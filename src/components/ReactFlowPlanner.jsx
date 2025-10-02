@@ -16,6 +16,8 @@ import StoryCard from './StoryCard';
 import LinkCard from './LinkCard';
 import CharacterCard from './CharacterCard';
 import TimelineCard from './TimelineCard';
+import TitleCard from './TitleCard';
+import CommentCard from './CommentCard';
 import LabeledEdge from './LabeledEdge';
 import { Plus, Check, Loader2, Upload, Loader } from 'lucide-react';
 import TopNav from './TopNav';
@@ -27,13 +29,18 @@ import {
   saveWorkspaceToLocalStorage,
 } from '@/lib/workspace';
 import { useAutoSave } from '@/hooks/useAutoSave';
+import { getBoard, saveBoardContent, getBoardPermission, updateBoardName } from '@/lib/boards';
+import { useRouter } from 'next/navigation';
+import ShareBoardDialog from './ShareBoardDialog';
 
 
 const nodeTypes = {
+  titleCard: TitleCard,
   storyCard: StoryCard,
   linkCard: LinkCard,
   characterCard: CharacterCard,
   timelineCard: TimelineCard,
+  commentCard: CommentCard,
 };
 
 const edgeTypes = {
@@ -78,13 +85,17 @@ const proOptions = { hideAttribution: true };
 
 const STORAGE_KEY = 'story-planner:flow:v1';
 
-export default function ReactFlowPlanner() {
+export default function ReactFlowPlanner({ boardId }) {
   const { user } = useAuth();
+  const router = useRouter();
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [nodeId, setNodeId] = useState(3);
   const [isLoading, setIsLoading] = useState(true);
   const fileInputRef = useRef(null);
+  const [currentBoard, setCurrentBoard] = useState(null);
+  const [boardPermission, setBoardPermission] = useState(null);
+  const [shareDialogOpen, setShareDialogOpen] = useState(false);
 
   // Track previous user to detect user changes
   const [previousUserId, setPreviousUserId] = useState(null);
@@ -110,70 +121,68 @@ export default function ReactFlowPlanner() {
   }, []);
 
   useEffect(() => {
-    const loadWorkspace = async () => {
+    const loadBoardData = async () => {
+      if (!boardId) {
+        router.push('/boards');
+        return;
+      }
+
+      if (!user?.uid) {
+        router.push('/login');
+        return;
+      }
+
       setIsLoading(true);
 
       try {
-        // If user changed, clear workspace first
-        const currentUserId = user?.uid || null;
-        const userChanged = previousUserId !== currentUserId;
+        // Load board from Firestore
+        const board = await getBoard(boardId);
 
-        if (userChanged) {
-          console.log('User changed from', previousUserId, 'to', currentUserId);
-          // Clear existing workspace immediately
-          setNodes([]);
-          setEdges([]);
-          setNodeId(1);
-          setPreviousUserId(currentUserId);
+        if (!board) {
+          toast.error('Board not found');
+          router.push('/boards');
+          return;
         }
 
-        let workspaceData = null;
+        // Check permission
+        const permission = getBoardPermission(board, user.uid);
+        if (!permission) {
+          toast.error('You do not have access to this board');
+          router.push('/boards');
+          return;
+        }
 
-        // If user is logged in, load ONLY their Firebase data
-        if (user?.uid) {
-          workspaceData = await loadWorkspaceFromFirebase(user.uid);
-          console.log('Firebase data for user', user.uid, ':', workspaceData);
+        setCurrentBoard(board);
+        setBoardPermission(permission);
 
-          if (workspaceData && Array.isArray(workspaceData.nodes) && Array.isArray(workspaceData.edges)) {
-            setNodes(workspaceData.nodes);
-            setEdges(workspaceData.edges);
-            const maxId = workspaceData.nodes
-              .map((n) => parseInt(n.id, 10))
-              .filter((n) => !Number.isNaN(n))
-              .reduce((acc, n) => Math.max(acc, n), 0);
-            setNodeId((maxId || 0) + 1);
-          } else {
-            // New user or no data - start with empty workspace
-            setNodes([]);
-            setEdges([]);
-            setNodeId(1);
-          }
+        // Load nodes and edges
+        const boardNodes = board.nodes || [];
+        const boardEdges = board.edges || [];
+
+        setNodes(boardNodes);
+        setEdges(boardEdges);
+
+        // Calculate next node ID
+        if (boardNodes.length > 0) {
+          const maxId = boardNodes
+            .map((n) => parseInt(n.id, 10))
+            .filter((n) => !Number.isNaN(n))
+            .reduce((acc, n) => Math.max(acc, n), 0);
+          setNodeId((maxId || 0) + 1);
         } else {
-          // Unauthenticated: start with empty board
-          setNodes([]);
-          setEdges([]);
           setNodeId(1);
         }
       } catch (e) {
-        console.error('Failed to load workspace', e);
-        if (user?.uid) {
-          // Authenticated fallback to empty workspace
-          setNodes([]);
-          setEdges([]);
-          setNodeId(1);
-        } else {
-          // Unauthenticated fallback to empty
-          setNodes([]);
-          setEdges([]);
-          setNodeId(1);
-        }
+        console.error('Failed to load board', e);
+        toast.error('Failed to load board');
+        router.push('/boards');
       } finally {
         setIsLoading(false);
       }
     };
 
-    loadWorkspace();
-  }, [user?.uid, setNodes, setEdges]); // Only depend on user.uid, not entire user object
+    loadBoardData();
+  }, [boardId, user?.uid, router, setNodes, setEdges]);
 
   const onConnect = useCallback(
     (params) =>
@@ -193,10 +202,52 @@ export default function ReactFlowPlanner() {
     [setEdges, user]
   );
 
+  // Add comment card next to a specific node
+  const addCommentToNode = useCallback((targetNodeId) => {
+    if (!user?.uid) {
+      toast("Please sign in to add comments.");
+      return;
+    }
+
+    const targetNode = nodes.find(n => n.id === targetNodeId);
+    if (!targetNode) return;
+
+    const newPosition = {
+      x: targetNode.position.x + 350, // Position to the right of the card
+      y: targetNode.position.y
+    };
+
+    const commentData = {
+      text: '',
+      authorId: user.uid,
+      authorName: user.displayName || user.email || 'Anonymous',
+      authorEmail: user.email || '',
+      createdAt: new Date()
+    };
+
+    const newNode = {
+      id: nodeId.toString(),
+      type: 'commentCard',
+      position: newPosition,
+      data: commentData,
+      dragHandle: '.drag-handle',
+    };
+
+    setNodes((nds) => [...nds, newNode]);
+    setNodeId((id) => id + 1);
+    toast('Comment created.', { icon: <Check className="w-4 h-4" /> });
+  }, [user, nodes, nodeId, setNodes]);
+
   const addNode = useCallback((cardTypeOrEvent, position) => {
     if (!user?.uid) {
       toast("Please sign in to add cards.");
       window.location.replace('/login');
+      return;
+    }
+
+    // Check permission - if comment-only, only allow commentCard
+    if (boardPermission === 'comment-only' && typeof cardTypeOrEvent === 'string' && cardTypeOrEvent !== 'commentCard') {
+      toast.error("You can only add comments to this board");
       return;
     }
 
@@ -205,7 +256,7 @@ export default function ReactFlowPlanner() {
     let newPosition;
 
     if (typeof cardTypeOrEvent === 'string') {
-      // Called from TopNav with cardType
+      // Called from TopNav or dropdown with cardType
       cardType = cardTypeOrEvent;
       newPosition = {
         x: Math.random() * 400 + 100,
@@ -214,7 +265,8 @@ export default function ReactFlowPlanner() {
     } else {
       // Called from double click
       console.log('Double click detected!', cardTypeOrEvent, position);
-      cardType = 'storyCard'; // Default for double click
+      // If comment-only, create comment card by default
+      cardType = boardPermission === 'comment-only' ? 'commentCard' : 'storyCard';
       newPosition = position || {
         x: Math.random() * 400 + 100,
         y: Math.random() * 300 + 100,
@@ -225,6 +277,11 @@ export default function ReactFlowPlanner() {
 
     let nodeData;
     switch (cardType) {
+      case 'titleCard':
+        nodeData = {
+          text: 'New Title'
+        };
+        break;
       case 'linkCard':
         nodeData = {
           url: '',
@@ -243,6 +300,15 @@ export default function ReactFlowPlanner() {
       case 'timelineCard':
         nodeData = {
           date: ''
+        };
+        break;
+      case 'commentCard':
+        nodeData = {
+          text: '',
+          authorId: user.uid,
+          authorName: user.displayName || user.email || 'Anonymous',
+          authorEmail: user.email || '',
+          createdAt: new Date()
         };
         break;
       case 'storyCard':
@@ -267,9 +333,9 @@ export default function ReactFlowPlanner() {
     });
     setNodeId((id) => id + 1);
 
-    const cardTypeName = cardType === 'linkCard' ? 'Link card' : 'Card';
+    const cardTypeName = cardType === 'commentCard' ? 'Comment' : cardType === 'linkCard' ? 'Link card' : 'Card';
     toast(`${cardTypeName} created.`, { icon: <Check className="w-4 h-4" /> });
-  }, [nodeId, setNodes, user]);
+  }, [nodeId, setNodes, user, boardPermission]);
 
   const updateNodeData = useCallback((id, newData) => {
     setNodes((nds) =>
@@ -291,7 +357,10 @@ export default function ReactFlowPlanner() {
   const handleDownloadWorkspace = useCallback(() => {
     try {
       const workspaceData = {
-        nodes: nodes.map(({ id, type, position, data }) => ({ id, type, position, data })),
+        nodes: nodes.map(({ id, type, position, data }) => {
+          const { onAddComment, isReadOnly, ...cleanData } = data || {};
+          return { id, type, position, data: cleanData };
+        }),
         edges: edges.map(({ id, source, target, sourceHandle, targetHandle, type, data, animated, style }) => ({ id, source, target, sourceHandle, targetHandle, type, data, animated, style })),
         exportedAt: new Date().toISOString(),
         appVersion: "1.0.0"
@@ -324,14 +393,20 @@ export default function ReactFlowPlanner() {
   }, [setNodes, setEdges]);
 
   const handleSave = useCallback(async (silent = false) => {
+    if (!boardId) return;
+
     try {
-      // Clean and filter node data
-      const cleanNodes = nodes.map(({ id, type, position, data }) => ({
-        id: id || '',
-        type: type || 'storyCard',
-        position: position || { x: 0, y: 0 },
-        data: data || { text: '' }
-      }));
+      // Clean and filter node data - remove functions like onAddComment and isReadOnly
+      const cleanNodes = nodes.map(({ id, type, position, data }) => {
+        // Remove functions and temporary props from data
+        const { onAddComment, isReadOnly, ...cleanData } = data || {};
+        return {
+          id: id || '',
+          type: type || 'storyCard',
+          position: position || { x: 0, y: 0 },
+          data: cleanData
+        };
+      });
 
       // Clean and filter edge data
       const cleanEdges = edges.map(({ id, source, target, sourceHandle, targetHandle, type, data, animated, style }) => ({
@@ -346,44 +421,32 @@ export default function ReactFlowPlanner() {
         ...(style && { style })
       }));
 
-      const dataToSave = {
-        nodes: cleanNodes,
-        edges: cleanEdges,
-      };
+      // Save to board
+      const saved = await saveBoardContent(boardId, cleanNodes, cleanEdges);
 
-      let saved = false;
-
-      // If user is logged in, save to Firebase
-      if (user?.uid) {
-        saved = await saveWorkspaceToFirebase(user.uid, dataToSave);
-        if (saved && !silent) {
-          toast("Workspace saved to cloud!", { icon: <Check className="w-4 h-4" /> });
-        }
-      }
-
-      // Always save to localStorage as backup
-      const localSaved = saveWorkspaceToLocalStorage(dataToSave);
-
-      if (!saved && localSaved && !silent) {
-        toast("Workspace saved locally!", { icon: <Check className="w-4 h-4" /> });
-      } else if (!saved && !localSaved && !silent) {
-        toast("Failed to save workspace", { variant: "destructive" });
+      if (saved && !silent) {
+        toast("Board saved!", { icon: <Check className="w-4 h-4" /> });
+      } else if (!saved && !silent) {
+        toast("Failed to save board", { variant: "destructive" });
       }
 
     } catch (e) {
-      console.error('Failed to save workspace', e);
+      console.error('Failed to save board', e);
       if (!silent) {
-        toast("Failed to save workspace", { variant: "destructive" });
+        toast("Failed to save board", { variant: "destructive" });
       }
       throw e; // Re-throw for auto-save error handling
     }
-  }, [user, nodes, edges]);
+  }, [boardId, nodes, edges]);
 
   // Prepare workspace data for auto-save comparison
   // Serialize to string to ensure deep comparison works correctly
   const workspaceData = useMemo(() =>
     JSON.stringify({
-      nodes: nodes.map(({ id, type, position, data }) => ({ id, type, position, data })),
+      nodes: nodes.map(({ id, type, position, data }) => {
+        const { onAddComment, isReadOnly, ...cleanData } = data || {};
+        return { id, type, position, data: cleanData };
+      }),
       edges: edges.map(({ id, source, target, sourceHandle, targetHandle, type, data, animated, style }) => ({
         id, source, target, sourceHandle, targetHandle, type, data, animated, style
       })),
@@ -395,13 +458,14 @@ export default function ReactFlowPlanner() {
     await handleSave(true);
   }, [handleSave]);
 
-  // Auto-save hook - only enabled when user is logged in
+  // Auto-save hook - enabled for both owner and comment-only users
+  // Comment-only users can save their comment cards
   const { status: saveStatus } = useAutoSave(
     silentSave,
     workspaceData,
     {
       debounceMs: 4000,
-      enabled: !!user?.uid && !isLoading,
+      enabled: !!user?.uid && !isLoading && !!boardPermission,
     }
   );
 
@@ -486,7 +550,66 @@ export default function ReactFlowPlanner() {
     event.target.value = '';
   }, [setNodes, setEdges, handleSave]);
 
+  // Handle board name change
+  const handleBoardNameChange = useCallback(async (newName) => {
+    if (!boardId || boardPermission !== 'owner') return;
 
+    try {
+      await updateBoardName(boardId, newName);
+      setCurrentBoard((prev) => prev ? { ...prev, name: newName } : null);
+      toast.success('Board name updated!', { icon: <Check className="w-4 h-4" /> });
+    } catch (error) {
+      console.error('Error updating board name:', error);
+      toast.error('Failed to update board name');
+    }
+  }, [boardId, boardPermission]);
+
+  // Reload board data after share dialog changes
+  const reloadBoardData = useCallback(async () => {
+    if (!boardId) return;
+
+    try {
+      const board = await getBoard(boardId);
+      if (board) {
+        setCurrentBoard(board);
+      }
+    } catch (error) {
+      console.error('Error reloading board:', error);
+    }
+  }, [boardId]);
+
+
+
+  // Enhance nodes with onAddComment function for storyCards and isReadOnly for all cards
+  const enhancedNodes = useMemo(() => {
+    const isReadOnly = boardPermission === 'comment-only';
+    return nodes.map(node => {
+      const baseNode = {
+        ...node,
+        data: {
+          ...node.data,
+          isReadOnly: isReadOnly
+        },
+        dragHandle: '.drag-handle',
+        // In comment-only mode: only commentCards are draggable
+        draggable: isReadOnly ? node.type === 'commentCard' : true,
+        connectable: !isReadOnly
+      };
+
+      // Only add onAddComment to storyCards
+      if (node.type === 'storyCard') {
+        return {
+          ...baseNode,
+          data: {
+            ...baseNode.data,
+            onAddComment: addCommentToNode
+          }
+        };
+      }
+
+      return baseNode;
+    });
+  }, [nodes, addCommentToNode, boardPermission]);
 
   if (isLoading) {
     return (
@@ -498,12 +621,17 @@ export default function ReactFlowPlanner() {
           onImportWorkspace={handleImportWorkspace}
           onClearWorkspace={handleClearWorkspace}
           saveStatus="idle"
+          boardName={currentBoard?.name}
+          onBoardNameChange={handleBoardNameChange}
+          onShareBoard={() => setShareDialogOpen(true)}
+          boardPermission={boardPermission}
+          showBoardControls={!!boardId}
         />
         <div className="w-full bg-background">
           <div className="h-screen flex items-center justify-center">
             <div className="flex flex-col items-center gap-4">
               <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
-              <p className="text-muted-foreground">Loading workspace...</p>
+              <p className="text-muted-foreground">Loading board...</p>
             </div>
           </div>
         </div>
@@ -520,6 +648,11 @@ export default function ReactFlowPlanner() {
         onImportWorkspace={handleImportWorkspace}
         onClearWorkspace={handleClearWorkspace}
         saveStatus={saveStatus}
+        boardName={currentBoard?.name}
+        onBoardNameChange={handleBoardNameChange}
+        onShareBoard={() => setShareDialogOpen(true)}
+        boardPermission={boardPermission}
+        showBoardControls={!!boardId}
       />
 
       {/* Hidden file input for import */}
@@ -533,15 +666,17 @@ export default function ReactFlowPlanner() {
       <div className="w-full bg-background">
         <div className="h-screen">
           <ReactFlow
-          nodes={nodes}
+          nodes={enhancedNodes}
           edges={edges}
           onNodesChange={onNodesChange}
-          onEdgesChange={onEdgesChange}
+          onEdgesChange={boardPermission === 'comment-only' ? undefined : onEdgesChange}
           onConnect={onConnect}
           nodeTypes={nodeTypes}
           edgeTypes={edgeTypes}
           fitView
           fitViewOptions={{ padding: 0.3, minZoom: 0.5, maxZoom: 1.5 }}
+          nodesConnectable={boardPermission !== 'comment-only'}
+          elementsSelectable={true}
           onDoubleClick={(event) => {
             // Yeni kart ekleme sadece boş alanda/diyagram arka planında çalışsın
             const target = event.target;
@@ -581,6 +716,15 @@ export default function ReactFlowPlanner() {
           </ReactFlow>
         </div>
       </div>
+
+      {/* Share Board Dialog */}
+      <ShareBoardDialog
+        open={shareDialogOpen}
+        onOpenChange={setShareDialogOpen}
+        boardId={boardId}
+        sharedWith={currentBoard?.sharedWith || []}
+        onUpdate={reloadBoardData}
+      />
     </ReactFlowProvider>
   );
 }

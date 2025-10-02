@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect, useCallback, memo } from 'react';
 import { Handle, Position, useReactFlow, useUpdateNodeInternals } from 'reactflow';
 import { motion } from 'framer-motion';
-import { GripVertical, Trash2, X, MoreVertical, Bot, Zap, RefreshCw, Check, Loader, Send } from 'lucide-react';
+import { GripVertical, Trash2, X, MoreVertical, Bot, Zap, RefreshCw, Check, Loader, Send, MessageSquare } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { AlertDialog, AlertDialogTrigger, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogAction, AlertDialogCancel } from '@/components/ui/alert-dialog';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
@@ -25,7 +25,7 @@ const handleStyle = {
   boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
 };
 
-function StoryCard({ id, data, selected }) {
+function StoryCard({ id, data, selected, onAddComment }) {
   const [isEditing, setIsEditing] = useState(false);
   const [text, setText] = useState(data.text || '');
   const textareaRef = useRef(null);
@@ -48,6 +48,9 @@ function StoryCard({ id, data, selected }) {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const dropdownRef = useRef(null);
   const { user } = useAuth();
+
+  // Check if card is read-only (from shared board with comment-only permission)
+  const isReadOnly = data.isReadOnly || false;
 
   useEffect(() => {
     setText(data.text || '');
@@ -75,12 +78,13 @@ function StoryCard({ id, data, selected }) {
   }, [isDropdownOpen]);
 
   const handleTitleSubmit = useCallback(() => {
+    if (isReadOnly) return;
     setNodes((nds) =>
       nds.map((node) =>
         node.id === id ? { ...node, data: { ...node.data, title } } : node
       )
     );
-  }, [id, title, setNodes]);
+  }, [id, title, setNodes, isReadOnly]);
 
   const handleTitleKeyDown = (e) => {
     if (e.key === 'Enter') {
@@ -118,13 +122,14 @@ function StoryCard({ id, data, selected }) {
   }, [text, isEditing]);
 
   const handleTextSubmit = useCallback(() => {
+    if (isReadOnly) return;
     setIsEditing(false);
     setNodes((nds) =>
       nds.map((node) =>
         node.id === id ? { ...node, data: { ...node.data, text } } : node
       )
     );
-  }, [id, text, setNodes]);
+  }, [id, text, setNodes, isReadOnly]);
 
   const handleKeyDown = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -235,10 +240,11 @@ function StoryCard({ id, data, selected }) {
   }, [id, setNodes, tempTags]);
 
   const removeTag = useCallback((value) => {
+    if (isReadOnly) return;
     setNodes((nds) => nds.map((node) =>
       node.id === id ? { ...node, data: { ...node.data, tags: tags.filter((t) => t !== value) } } : node
     ));
-  }, [id, tags, setNodes]);
+  }, [id, tags, setNodes, isReadOnly]);
 
   const handleAiGenerate = useCallback(async (userComment = '') => {
     setAiLoading(true);
@@ -260,7 +266,7 @@ function StoryCard({ id, data, selected }) {
         requestBody.userComment = userComment.trim();
       }
 
-      const response = await fetch('http://localhost:4111/api/agents/gymAgent/generate', {
+      const response = await fetch('https://modern-crashing-finland.mastra.cloud/api/agents/gymAgent/generate', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
@@ -476,33 +482,39 @@ function StoryCard({ id, data, selected }) {
             <input
               type="text"
               value={title}
-              onChange={(e) => setTitle(e.target.value.slice(0, 100))}
+              onChange={(e) => !isReadOnly && setTitle(e.target.value.slice(0, 100))}
               onBlur={handleTitleSubmit}
               onKeyDown={handleTitleKeyDown}
               maxLength={100}
               placeholder="Title"
-              className="bg-transparent text-sm outline-none placeholder:text-muted-foreground px-2 py-1 rounded-md hover:bg-foreground/5 focus:bg-foreground/5 transition-colors max-w-[200px] truncate"
+              className={cn(
+                "bg-transparent text-sm outline-none placeholder:text-muted-foreground px-2 py-1 rounded-md transition-colors max-w-[200px] truncate",
+                !isReadOnly && "hover:bg-foreground/5 focus:bg-foreground/5"
+              )}
               title={title}
               ref={titleInputRef}
+              readOnly={isReadOnly}
             />
           </div>
           <div className="flex items-center">
-            <button
-              onClick={handleAiGenerate}
-              disabled={aiLoading}
-              className="px-1 py-1.5 rounded-md hover:bg-foreground/10 transition-colors disabled:opacity-50"
-              title="AI Suggestion"
-            >
-              <Zap className="w-4 h-4 text-purple-500" />
-            </button>
-            <div className="relative" ref={dropdownRef}>
-              <button
-                className="px-1 py-1.5 rounded-md hover:bg-foreground/10 transition-colors"
-                title="Actions"
-                onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-              >
-                <MoreVertical className="w-4 h-4" />
-              </button>
+            {!isReadOnly && (
+              <>
+                <button
+                  onClick={handleAiGenerate}
+                  disabled={aiLoading}
+                  className="px-1 py-1.5 rounded-md hover:bg-foreground/10 transition-colors disabled:opacity-50"
+                  title="AI Suggestion"
+                >
+                  <Zap className="w-4 h-4 text-purple-500" />
+                </button>
+                <div className="relative" ref={dropdownRef}>
+                  <button
+                    className="px-1 py-1.5 rounded-md hover:bg-foreground/10 transition-colors"
+                    title="Actions"
+                    onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+                  >
+                    <MoreVertical className="w-4 h-4" />
+                  </button>
 
               {isDropdownOpen && (
                 <div className="absolute right-0 top-full mt-1 w-40 bg-popover border border-border rounded-md shadow-lg z-50 animate-in fade-in-0 zoom-in-95 data-[side=bottom]:slide-in-from-top-2">
@@ -527,6 +539,18 @@ function StoryCard({ id, data, selected }) {
                       Add tag
                       <span className="text-[10px] text-muted-foreground/70">Alt+T</span>
                     </button>
+                    {onAddComment && (
+                      <button
+                        className="w-full px-2 py-1.5 mx-1 text-sm text-left hover:bg-accent hover:text-accent-foreground flex items-center gap-2 transition-colors rounded-sm"
+                        onClick={() => {
+                          onAddComment(id);
+                          setIsDropdownOpen(false);
+                        }}
+                      >
+                        <MessageSquare className="w-4 h-4" />
+                        Add comment
+                      </button>
+                    )}
                   </div>
 
                   <div className="border-t border-border py-1">
@@ -553,22 +577,24 @@ function StoryCard({ id, data, selected }) {
                   </div>
                 </div>
               )}
-            </div>
+                </div>
 
-            <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
-              <AlertDialogContent>
-                <AlertDialogHeader>
-                  <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
-                  <AlertDialogDescription>
-                    This action cannot be undone. This card will be permanently deleted and all of its connections and data will be removed.
-                  </AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                  <AlertDialogCancel>Cancel</AlertDialogCancel>
-                  <AlertDialogAction onClick={handleDelete}>Continue</AlertDialogAction>
-                </AlertDialogFooter>
-              </AlertDialogContent>
-            </AlertDialog>
+                <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        This action cannot be undone. This card will be permanently deleted and all of its connections and data will be removed.
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>Cancel</AlertDialogCancel>
+                      <AlertDialogAction onClick={handleDelete}>Continue</AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
+              </>
+            )}
           </div>
         </div>
 
@@ -599,8 +625,11 @@ function StoryCard({ id, data, selected }) {
           ) : (
             <div
               ref={divRef}
-              className="text-sm cursor-text whitespace-pre-wrap break-words text-foreground mb-3"
-              onClick={() => setIsEditing(true)}
+              className={cn(
+                "text-sm whitespace-pre-wrap break-words text-foreground mb-3",
+                !isReadOnly && "cursor-text"
+              )}
+              onClick={() => !isReadOnly && setIsEditing(true)}
               onWheel={(e) => { e.stopPropagation(); }}
               onWheelCapture={(e) => { e.stopPropagation(); }}
               onTouchMoveCapture={(e) => { e.stopPropagation(); }}
@@ -624,14 +653,16 @@ function StoryCard({ id, data, selected }) {
                 {tags.map((tag) => (
                   <Badge key={tag} variant="secondary" className="pr-1.5 break-words text-xs bg-white/50 dark:bg-white/10">
                     {tag}
-                    <button
-                      type="button"
-                      onClick={() => removeTag(tag)}
-                      className="ml-1 inline-flex items-center justify-center rounded-sm hover:bg-foreground/10"
-                      aria-label={`Remove ${tag}`}
-                    >
-                      <X className="w-3 h-3" />
-                    </button>
+                    {!isReadOnly && (
+                      <button
+                        type="button"
+                        onClick={() => removeTag(tag)}
+                        className="ml-1 inline-flex items-center justify-center rounded-sm hover:bg-foreground/10"
+                        aria-label={`Remove ${tag}`}
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    )}
                   </Badge>
                 ))}
               </div>

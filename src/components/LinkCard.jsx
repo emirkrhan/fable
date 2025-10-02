@@ -32,6 +32,8 @@ function LinkCard({ id, data, selected }) {
   const { setNodes, setEdges, getNodes } = useReactFlow();
   const updateNodeInternals = useUpdateNodeInternals();
 
+  const isReadOnly = data.isReadOnly || false;
+
   useEffect(() => {
     setTempUrl(data.url || '');
   }, [data.url]);
@@ -45,6 +47,7 @@ function LinkCard({ id, data, selected }) {
   }, [id, updateNodeInternals]);
 
   const handleSave = useCallback(() => {
+    if (isReadOnly) return;
     setNodes((nds) =>
       nds.map((node) =>
         node.id === id
@@ -53,7 +56,7 @@ function LinkCard({ id, data, selected }) {
       )
     );
     setIsEditing(false);
-  }, [id, tempUrl, tempPreview, setNodes]);
+  }, [id, tempUrl, tempPreview, setNodes, isReadOnly]);
 
   // Close popover and dropdown when clicking outside
   useEffect(() => {
@@ -132,11 +135,12 @@ function LinkCard({ id, data, selected }) {
     <div className="relative">
       <div
         className={cn(
-          "bg-gradient-to-r from-blue-50 to-blue-100 dark:from-blue-950/50 dark:to-blue-900/50 border-2 border-blue-200 dark:border-blue-800 rounded-lg w-72 h-12 node-card relative group cursor-pointer",
+          "bg-gradient-to-r from-blue-50 to-blue-100 dark:from-blue-950/50 dark:to-blue-900/50 border-2 border-blue-200 dark:border-blue-800 rounded-lg w-72 h-12 node-card relative group",
           "transition-all duration-200",
-          selected && "border-blue-400"
+          selected && "border-blue-400",
+          !isReadOnly && "cursor-pointer"
         )}
-        onClick={() => { setIsPopoverOpen(true); setIsEditing(true); }}
+        onClick={() => { if (!isReadOnly) { setIsPopoverOpen(true); setIsEditing(true); } }}
       >
         {/* Only side handles */}
         <Handle
@@ -184,7 +188,8 @@ function LinkCard({ id, data, selected }) {
                 <ExternalLink className="w-3 h-3 text-white" />
               </button>
             )}
-            <div className="relative" ref={dropdownRef}>
+            {!isReadOnly && (
+              <div className="relative" ref={dropdownRef}>
               <button
                 onClick={(e) => {
                   e.stopPropagation();
@@ -223,7 +228,8 @@ function LinkCard({ id, data, selected }) {
                   </div>
                 </div>
               )}
-            </div>
+              </div>
+            )}
           </div>
         </motion.div>
 

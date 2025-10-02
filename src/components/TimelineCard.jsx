@@ -28,13 +28,16 @@ function TimelineCard({ id, data, selected }) {
   const { setNodes, setEdges, getNodes } = useReactFlow();
   const updateNodeInternals = useUpdateNodeInternals();
 
+  const isReadOnly = data.isReadOnly || false;
+
   useEffect(() => { updateNodeInternals(id); }, [id, updateNodeInternals]);
 
   const handleDateSelect = useCallback((date) => {
+    if (isReadOnly) return;
     // Immediately save and close when date is selected
     setNodes((nds) => nds.map((node) => node.id === id ? { ...node, data: { ...node.data, date: date ? date.toISOString() : '' } } : node));
     setIsPopoverOpen(false);
-  }, [id, setNodes]);
+  }, [id, setNodes, isReadOnly]);
 
   useEffect(() => {
     function handleClickOutside(event) {
@@ -63,11 +66,12 @@ function TimelineCard({ id, data, selected }) {
     <div className="relative">
       <div
         className={cn(
-          "bg-gradient-to-r from-purple-50 to-purple-100 dark:from-purple-950/50 dark:to-purple-900/50 border-2 border-purple-200 dark:border-purple-800 rounded-lg w-72 h-12 node-card relative group cursor-pointer",
+          "bg-gradient-to-r from-purple-50 to-purple-100 dark:from-purple-950/50 dark:to-purple-900/50 border-2 border-purple-200 dark:border-purple-800 rounded-lg w-72 h-12 node-card relative group",
           "transition-all duration-200",
-          selected && "border-purple-400"
+          selected && "border-purple-400",
+          !isReadOnly && "cursor-pointer"
         )}
-        onClick={() => setIsPopoverOpen(true)}
+        onClick={() => !isReadOnly && setIsPopoverOpen(true)}
       >
         {/* Only side handles */}
         <Handle
@@ -91,7 +95,8 @@ function TimelineCard({ id, data, selected }) {
             <CalendarIcon className="w-4 h-4 text-white" />
           </div>
           <div className="flex-1 min-w-0 text-sm text-purple-900 dark:text-purple-100 truncate">{display}</div>
-          <div className="flex items-center gap-1 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" ref={dropdownRef}>
+          {!isReadOnly && (
+            <div className="flex items-center gap-1 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" ref={dropdownRef}>
             <button
               onClick={(e) => { e.stopPropagation(); setIsDropdownOpen(!isDropdownOpen); }}
               className="p-1 hover:bg-purple-200 dark:hover:bg-purple-800 rounded transition-colors"
@@ -113,6 +118,7 @@ function TimelineCard({ id, data, selected }) {
               </div>
             )}
           </div>
+          )}
         </motion.div>
       </div>
 

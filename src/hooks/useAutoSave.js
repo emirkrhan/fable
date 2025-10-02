@@ -46,9 +46,9 @@ export function useAutoSave(saveFunction, data, options = {}) {
     const previousSerialized = previousDataRef.current;
 
     if (previousSerialized === null) {
-      // First time, consider it changed
+      // First time, just store the data - don't consider it changed
       previousDataRef.current = currentSerialized;
-      return true;
+      return false;
     }
 
     const changed = currentSerialized !== previousSerialized;

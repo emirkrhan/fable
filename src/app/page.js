@@ -1,5 +1,14 @@
-import ReactFlowPlanner from '@/components/ReactFlowPlanner';
+'use client';
+
+import { useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 
 export default function Home() {
-  return <ReactFlowPlanner />;
+  const router = useRouter();
+
+  useEffect(() => {
+    router.push('/boards');
+  }, [router]);
+
+  return null;
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useState, useRef, useEffect } from "react";
-import { Save, Plus, LogOut, Download, Trash2, User, Settings, FileText, Upload, Link, ChevronDown, UserPlus, Calendar as CalendarIcon, Loader, Check } from "lucide-react";
+import { Save, Plus, LogOut, Download, Trash2, User, Settings, FileText, Upload, Link, ChevronDown, UserPlus, Calendar as CalendarIcon, Loader, Check, Type, MessageSquare, Share2, ArrowLeft, Home } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "./ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar";
@@ -18,13 +18,32 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 
-function TopNav({ onSave, onAdd, onDownloadWorkspace, onImportWorkspace, onClearWorkspace, saveStatus }) {
+function TopNav({
+  onSave,
+  onAdd,
+  onDownloadWorkspace,
+  onImportWorkspace,
+  onClearWorkspace,
+  saveStatus,
+  boardName,
+  onBoardNameChange,
+  onShareBoard,
+  boardPermission,
+  showBoardControls = false
+}) {
   const { user, logout } = useAuth();
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [isCardDropdownOpen, setIsCardDropdownOpen] = useState(false);
   const [showClearDialog, setShowClearDialog] = useState(false);
   const dropdownRef = useRef(null);
   const cardDropdownRef = useRef(null);
+  const [editingBoardName, setEditingBoardName] = useState(false);
+  const [tempBoardName, setTempBoardName] = useState(boardName || '');
+
+  // Update tempBoardName when boardName prop changes
+  useEffect(() => {
+    setTempBoardName(boardName || '');
+  }, [boardName]);
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -42,11 +61,63 @@ function TopNav({ onSave, onAdd, onDownloadWorkspace, onImportWorkspace, onClear
     return () => document.removeEventListener('click', handleClickOutside);
   }, [isDropdownOpen, isCardDropdownOpen]);
 
+  const handleBoardNameSubmit = () => {
+    if (tempBoardName.trim() && onBoardNameChange) {
+      onBoardNameChange(tempBoardName.trim());
+    }
+    setEditingBoardName(false);
+  };
+
   return (
     <div className="w-full fixed top-0 z-50 pointer-events-none">
       <div className="w-full px-6 h-24 flex items-center justify-between">
         <div className="ps-10 flex items-center gap-2.5 pointer-events-auto">
           <img src="/log.png" alt="fable" className="h-10" style={{ mixBlendMode: 'multiply' }} />
+
+          {showBoardControls && (
+            <>
+              <div className="h-6 w-px bg-border mx-2" />
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => window.location.href = '/boards'}
+                className="px-2"
+              >
+                <ArrowLeft className="w-4 h-4" />
+              </Button>
+
+              {boardPermission === 'owner' && editingBoardName ? (
+                <input
+                  type="text"
+                  value={tempBoardName}
+                  onChange={(e) => setTempBoardName(e.target.value)}
+                  onBlur={handleBoardNameSubmit}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleBoardNameSubmit();
+                    if (e.key === 'Escape') {
+                      setTempBoardName(boardName || '');
+                      setEditingBoardName(false);
+                    }
+                  }}
+                  className="px-2 py-1 text-sm font-medium bg-background border border-border rounded-md outline-none focus:ring-2 focus:ring-primary"
+                  autoFocus
+                />
+              ) : (
+                <div
+                  className={cn(
+                    "text-sm font-medium px-2 py-1 rounded-md",
+                    boardPermission === 'owner' && "cursor-pointer hover:bg-accent"
+                  )}
+                  onClick={() => boardPermission === 'owner' && setEditingBoardName(true)}
+                >
+                  {boardName || 'Untitled Board'}
+                  {boardPermission === 'comment-only' && (
+                    <span className="ml-2 text-xs text-muted-foreground">(View Only)</span>
+                  )}
+                </div>
+              )}
+            </>
+          )}
         </div>
 
         <div className="flex items-center gap-2 pointer-events-auto">
@@ -67,6 +138,21 @@ function TopNav({ onSave, onAdd, onDownloadWorkspace, onImportWorkspace, onClear
             {isCardDropdownOpen && (
               <div className="absolute left-0 top-full mt-2 w-52 bg-popover border border-border rounded-md shadow-lg z-50 animate-in fade-in-0 zoom-in-95">
                 <div className="p-1">
+                  <button
+                    className="w-full px-2 py-1 text-left hover:bg-accent hover:text-accent-foreground flex items-center gap-2 transition-colors rounded-sm group"
+                    onClick={() => {
+                      onAdd('titleCard');
+                      setIsCardDropdownOpen(false);
+                    }}
+                  >
+                    <div className="w-6 h-6 bg-emerald-500/10 rounded-md flex items-center justify-center group-hover:bg-emerald-500/20 transition-colors flex-shrink-0">
+                      <Type className="w-3.5 h-3.5 text-emerald-500" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-xs font-medium">Title Card</div>
+                      <div className="text-[11px] text-muted-foreground">Large heading text</div>
+                    </div>
+                  </button>
                   <button
                     className="w-full px-2 py-1 text-left hover:bg-accent hover:text-accent-foreground flex items-center gap-2 transition-colors rounded-sm group"
                     onClick={() => {
@@ -127,11 +213,34 @@ function TopNav({ onSave, onAdd, onDownloadWorkspace, onImportWorkspace, onClear
                       <div className="text-[11px] text-muted-foreground">Date marker</div>
                     </div>
                   </button>
+                  <button
+                    className="w-full px-2 py-1 text-left hover:bg-accent hover:text-accent-foreground flex items-center gap-2 transition-colors rounded-sm group"
+                    onClick={() => {
+                      onAdd('commentCard');
+                      setIsCardDropdownOpen(false);
+                    }}
+                  >
+                    <div className="w-6 h-6 bg-amber-500/10 rounded-md flex items-center justify-center group-hover:bg-amber-500/20 transition-colors flex-shrink-0">
+                      <MessageSquare className="w-3.5 h-3.5 text-amber-500" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-xs font-medium">Comment Card</div>
+                      <div className="text-[11px] text-muted-foreground">Add a comment</div>
+                    </div>
+                  </button>
                 </div>
               </div>
             )}
           </div>
-          <Button onClick={onSave} variant="secondary" className="gap-1 text-xs" disabled={saveStatus === 'saving'}>
+
+          {showBoardControls && boardPermission === 'owner' && onShareBoard && (
+            <Button onClick={onShareBoard} variant="secondary" className="gap-1 text-xs">
+              <Share2 className="w-3.5 h-3.5" />
+              Share
+            </Button>
+          )}
+
+          <Button onClick={onSave} variant="secondary" className="gap-1 text-xs" disabled={saveStatus === 'saving' || boardPermission === 'comment-only'}>
             {saveStatus === 'saving' ? (
               <>
                 <Loader className="w-3.5 h-3.5 animate-spin" />
@@ -153,7 +262,7 @@ function TopNav({ onSave, onAdd, onDownloadWorkspace, onImportWorkspace, onClear
           {user ? (
             <div className="relative" ref={dropdownRef}>
               <Avatar
-                className="cursor-pointer transition-all"
+                className="cursor-pointer transition-all hover:opacity-80"
                 onClick={() => {
                   setIsDropdownOpen(!isDropdownOpen);
                   setIsCardDropdownOpen(false);
@@ -262,10 +371,14 @@ function TopNav({ onSave, onAdd, onDownloadWorkspace, onImportWorkspace, onClear
               </AlertDialog>
             </div>
           ) : (
-            <Avatar>
-              <AvatarImage src="https://github.com/shadcn.png" alt="Guest" />
-              <AvatarFallback>G</AvatarFallback>
-            </Avatar>
+            <Button
+              onClick={() => window.location.href = '/login'}
+              variant="default"
+              className="gap-1 text-xs"
+            >
+              <User className="w-3.5 h-3.5" />
+              Login
+            </Button>
           )}
         </div>
       </div>

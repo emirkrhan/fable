@@ -29,6 +29,8 @@ function CharacterCard({ id, data, selected }) {
   const { setNodes, setEdges, getNodes } = useReactFlow();
   const updateNodeInternals = useUpdateNodeInternals();
 
+  const isReadOnly = data.isReadOnly || false;
+
   const profileUrl = data.profileUrl || '';
   const firstName = data.firstName || '';
   const lastName = data.lastName || '';
@@ -49,6 +51,7 @@ function CharacterCard({ id, data, selected }) {
   }, [data.profileUrl, data.firstName, data.lastName, data.synopsis]);
 
   const handleSave = useCallback(() => {
+    if (isReadOnly) return;
     setNodes((nds) => nds.map((node) => node.id === id ? {
       ...node,
       data: {
@@ -60,7 +63,7 @@ function CharacterCard({ id, data, selected }) {
       }
     } : node));
     setIsEditing(false);
-  }, [id, tempProfileUrl, tempFirstName, tempLastName, tempSynopsis, setNodes]);
+  }, [id, tempProfileUrl, tempFirstName, tempLastName, tempSynopsis, setNodes, isReadOnly]);
 
   useEffect(() => {
     function handleClickOutside(event) {
@@ -119,11 +122,12 @@ function CharacterCard({ id, data, selected }) {
     <div className="relative">
       <div
         className={cn(
-          "bg-card border border-border rounded-lg w-80 h-auto node-card relative group cursor-pointer",
+          "bg-card border border-border rounded-lg w-80 h-auto node-card relative group",
           "transition-colors duration-150",
-          selected && "border-primary/40"
+          selected && "border-primary/40",
+          !isReadOnly && "cursor-pointer"
         )}
-        onClick={() => { setIsPopoverOpen(true); setIsEditing(true); setTimeout(() => firstNameRef.current?.focus(), 0); }}
+        onClick={() => { if (!isReadOnly) { setIsPopoverOpen(true); setIsEditing(true); setTimeout(() => firstNameRef.current?.focus(), 0); } }}
       >
         {/* Four handles */}
         <Handle type="source" position={Position.Top} id="top" style={{...handleStyle, top: -6}} isConnectable={true} />
@@ -150,7 +154,8 @@ function CharacterCard({ id, data, selected }) {
               </div>
             </div>
             <div className="flex items-center">
-              <div className="relative" ref={dropdownRef}>
+              {!isReadOnly && (
+                <div className="relative" ref={dropdownRef}>
                 <button
                   className="px-1 py-1.5 rounded-md hover:bg-foreground/10 transition-colors"
                   title="Actions"
@@ -177,24 +182,26 @@ function CharacterCard({ id, data, selected }) {
                     </div>
                   </div>
                 )}
-              </div>
-
-              <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
-                <AlertDialogContent>
-                  <AlertDialogHeader>
-                    <AlertDialogTitle>Delete character?</AlertDialogTitle>
-                    <AlertDialogDescription>This action cannot be undone.</AlertDialogDescription>
-                  </AlertDialogHeader>
-                  <AlertDialogFooter>
-                    <AlertDialogCancel>Cancel</AlertDialogCancel>
-                    <AlertDialogAction onClick={handleDelete}>Delete</AlertDialogAction>
-                  </AlertDialogFooter>
-                </AlertDialogContent>
-              </AlertDialog>
+                </div>
+              )}
             </div>
           </div>
         </motion.div>
       </div>
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete character?</AlertDialogTitle>
+            <AlertDialogDescription>This action cannot be undone.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDelete}>Delete</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Popover */}
       {isPopoverOpen && (
