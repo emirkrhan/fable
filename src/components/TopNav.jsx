@@ -17,6 +17,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import ActiveUsers from "./ActiveUsers";
 
 function TopNav({
   onSave,
@@ -29,7 +30,9 @@ function TopNav({
   onBoardNameChange,
   onShareBoard,
   boardPermission,
-  showBoardControls = false
+  showBoardControls = false,
+  activeUsers = [],
+  currentUserId = null
 }) {
   const { user, logout } = useAuth();
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
@@ -119,6 +122,13 @@ function TopNav({
             </>
           )}
         </div>
+
+        {/* 👥 Active Users - Center of navbar */}
+        {showBoardControls && (
+          <div className="absolute left-1/2 -translate-x-1/2 pointer-events-auto">
+            <ActiveUsers activeUsers={activeUsers} currentUserId={currentUserId} />
+          </div>
+        )}
 
         <div className="flex items-center gap-2 pointer-events-auto">
           <div className="relative" ref={cardDropdownRef}>

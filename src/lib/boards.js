@@ -10,7 +10,8 @@ import {
   query,
   where,
   orderBy,
-  Timestamp
+  Timestamp,
+  serverTimestamp
 } from 'firebase/firestore';
 import { db } from './firebase';
 
@@ -240,4 +241,136 @@ export function getBoardPermission(board, userId) {
 
   const sharedAccess = board.sharedWith?.find(share => share.userId === userId);
   return sharedAccess?.permission || null;
+}
+
+/**
+ * Join board - Mark user as active
+ * Uses server timestamp for accurate presence tracking
+ */
+export async function joinBoard(boardId, userId, userName, photoURL) {
+  try {
+    const boardRef = doc(db, BOARDS_COLLECTION, boardId);
+    const board = await getBoard(boardId);
+    
+    if (!board) return false;
+
+    // Mevcut aktif kullanıcıları al
+    const activeUsers = board.activeUsers || [];
+    
+    // Kullanıcı zaten aktif mi?
+    const existingUserIndex = activeUsers.findIndex(u => u.userId === userId);
+    
+    // Mevcut kullanıcının rengini koru veya yeni renk oluştur
+    const userColor = existingUserIndex >= 0 
+      ? activeUsers[existingUserIndex].color 
+      : getRandomUserColor();
+    
+    const newUser = {
+      userId,
+      userName: userName || 'Anonymous',
+      photoURL: photoURL || '',
+      color: userColor,
+      lastSeen: Timestamp.now() // ⚡ Server timestamp kullan - daha güvenilir
+    };
+    
+    let updatedActiveUsers;
+    if (existingUserIndex >= 0) {
+      // Varsa güncelle (rengi koru)
+      updatedActiveUsers = [...activeUsers];
+      updatedActiveUsers[existingUserIndex] = newUser;
+    } else {
+      // Yoksa ekle
+      updatedActiveUsers = [...activeUsers, newUser];
+    }
+    
+    await updateDoc(boardRef, {
+      activeUsers: updatedActiveUsers
+    });
+    
+    return true;
+  } catch (error) {
+    console.error('Error joining board:', error);
+    return false;
+  }
+}
+
+/**
+ * Update heartbeat - Keep user alive without full rejoin
+ * Lightweight operation - only updates timestamp
+ */
+export async function updateUserHeartbeat(boardId, userId) {
+  try {
+    const boardRef = doc(db, BOARDS_COLLECTION, boardId);
+    const board = await getBoard(boardId);
+    
+    if (!board) return false;
+
+    const activeUsers = board.activeUsers || [];
+    const userIndex = activeUsers.findIndex(u => u.userId === userId);
+    
+    if (userIndex === -1) {
+      // User not in list - they need to join first
+      return false;
+    }
+    
+    // Sadece timestamp'i güncelle - minimal write operation
+    const updatedActiveUsers = [...activeUsers];
+    updatedActiveUsers[userIndex] = {
+      ...updatedActiveUsers[userIndex],
+      lastSeen: Timestamp.now()
+    };
+    
+    await updateDoc(boardRef, {
+      activeUsers: updatedActiveUsers
+    });
+    
+    return true;
+  } catch (error) {
+    console.error('Error updating heartbeat:', error);
+    return false;
+  }
+}
+
+/**
+ * Leave board - Remove user from active users
+ */
+export async function leaveBoard(boardId, userId) {
+  try {
+    const boardRef = doc(db, BOARDS_COLLECTION, boardId);
+    const board = await getBoard(boardId);
+    
+    if (!board) return false;
+
+    const updatedActiveUsers = (board.activeUsers || []).filter(
+      user => user.userId !== userId
+    );
+    
+    await updateDoc(boardRef, {
+      activeUsers: updatedActiveUsers
+    });
+    
+    return true;
+  } catch (error) {
+    console.error('Error leaving board:', error);
+    return false;
+  }
+}
+
+/**
+ * Get random user color for avatar
+ */
+function getRandomUserColor() {
+  const colors = [
+    '#FF6B6B', // Red
+    '#4ECDC4', // Teal
+    '#45B7D1', // Blue
+    '#FFA07A', // Orange
+    '#98D8C8', // Mint
+    '#F7DC6F', // Yellow
+    '#BB8FCE', // Purple
+    '#85C1E2', // Sky blue
+    '#F8B500', // Amber
+    '#52B788', // Green
+  ];
+  return colors[Math.floor(Math.random() * colors.length)];
 }

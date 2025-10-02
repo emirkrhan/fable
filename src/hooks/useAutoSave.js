@@ -67,6 +67,13 @@ export function useAutoSave(saveFunction, data, options = {}) {
       return;
     }
 
+    // 🔒 Boş data ise kaydetme (ilk yükleme)
+    const serialized = serializeData(data);
+    if (!serialized || serialized === '""' || serialized === '{}' || serialized === '[]') {
+      setStatus('idle');
+      return;
+    }
+
     // Check if data changed
     if (!hasDataChanged()) {
       setStatus('idle');

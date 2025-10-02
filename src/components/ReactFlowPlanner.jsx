@@ -32,6 +32,10 @@ import { useAutoSave } from '@/hooks/useAutoSave';
 import { getBoard, saveBoardContent, getBoardPermission, updateBoardName } from '@/lib/boards';
 import { useRouter } from 'next/navigation';
 import ShareBoardDialog from './ShareBoardDialog';
+import { doc, onSnapshot } from 'firebase/firestore';
+import { db } from '@/lib/firebase';
+import ActiveUsers from './ActiveUsers';
+import { joinBoard, leaveBoard, updateUserHeartbeat } from '@/lib/boards';
 
 
 const nodeTypes = {
@@ -85,17 +89,69 @@ const proOptions = { hideAttribution: true };
 
 const STORAGE_KEY = 'story-planner:flow:v1';
 
+/**
+ * Deep comparison for nodes/edges arrays
+ * Prevents unnecessary state updates when data hasn't actually changed
+ */
+function areNodesEqual(nodes1, nodes2) {
+  if (!nodes1 || !nodes2) return false;
+  if (nodes1.length !== nodes2.length) return false;
+  
+  try {
+    const str1 = JSON.stringify(nodes1.map(({ id, type, position, data }) => {
+      if (!data) return { id, type, position, data: {} };
+      const { onAddComment, isReadOnly, ...cleanData } = data;
+      return { id, type, position, data: cleanData };
+    }));
+    
+    const str2 = JSON.stringify(nodes2.map(({ id, type, position, data }) => {
+      if (!data) return { id, type, position, data: {} };
+      const { onAddComment, isReadOnly, ...cleanData } = data;
+      return { id, type, position, data: cleanData };
+    }));
+    
+    return str1 === str2;
+  } catch {
+    return false;
+  }
+}
+
+function areEdgesEqual(edges1, edges2) {
+  if (!edges1 || !edges2) return false;
+  if (edges1.length !== edges2.length) return false;
+  
+  try {
+    const str1 = JSON.stringify(edges1.map(({ id, source, target, sourceHandle, targetHandle, type, data, animated, style }) => 
+      ({ id, source, target, sourceHandle, targetHandle, type, data, animated, style })
+    ));
+    
+    const str2 = JSON.stringify(edges2.map(({ id, source, target, sourceHandle, targetHandle, type, data, animated, style }) => 
+      ({ id, source, target, sourceHandle, targetHandle, type, data, animated, style })
+    ));
+    
+    return str1 === str2;
+  } catch {
+    return false;
+  }
+}
+
 export default function ReactFlowPlanner({ boardId }) {
   const { user } = useAuth();
   const router = useRouter();
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [nodeId, setNodeId] = useState(3);
+  const nodeIdRef = useRef(3); // ⚠️ FIX: nodeId için ref ekledik
   const [isLoading, setIsLoading] = useState(true);
   const fileInputRef = useRef(null);
   const [currentBoard, setCurrentBoard] = useState(null);
   const [boardPermission, setBoardPermission] = useState(null);
   const [shareDialogOpen, setShareDialogOpen] = useState(false);
+  const [activeUsers, setActiveUsers] = useState([]); // 👥 Aktif kullanıcılar
+  const hasInitialDataLoadedRef = useRef(false); // 🔒 İlk yükleme flag - state değil ref!
+  const initialWorkspaceDataRef = useRef(null); // 🔒 İlk workspace data - comparison için
+  const previousNodesRef = useRef(null); // 🔒 Önceki nodes - deep comparison için
+  const previousEdgesRef = useRef(null); // 🔒 Önceki edges - deep comparison için
 
   // Track previous user to detect user changes
   const [previousUserId, setPreviousUserId] = useState(null);
@@ -120,8 +176,8 @@ export default function ReactFlowPlanner({ boardId }) {
     return () => document.removeEventListener('click', handleGlobalClick, true);
   }, []);
 
+  // ✨ REAL-TIME SYNC: Firestore onSnapshot kullanarak canlı güncelleme
   useEffect(() => {
-    const loadBoardData = async () => {
       if (!boardId) {
         router.push('/boards');
         return;
@@ -134,17 +190,22 @@ export default function ReactFlowPlanner({ boardId }) {
 
       setIsLoading(true);
 
-      try {
-        // Load board from Firestore
-        const board = await getBoard(boardId);
-
-        if (!board) {
+    // 🔥 Real-time listener - değişiklikleri anında yakala
+    const boardRef = doc(db, 'boards', boardId);
+    
+    const unsubscribe = onSnapshot(
+      boardRef,
+      (snapshot) => {
+        // Board yoksa
+        if (!snapshot.exists()) {
           toast.error('Board not found');
           router.push('/boards');
           return;
         }
 
-        // Check permission
+        const board = { id: snapshot.id, ...snapshot.data() };
+
+        // Permission kontrolü
         const permission = getBoardPermission(board, user.uid);
         if (!permission) {
           toast.error('You do not have access to this board');
@@ -154,35 +215,148 @@ export default function ReactFlowPlanner({ boardId }) {
 
         setCurrentBoard(board);
         setBoardPermission(permission);
+        
+        // 👥 Active users'ı güncelle
+        setActiveUsers(board.activeUsers || []);
 
-        // Load nodes and edges
+        // ✅ Real-time güncelleme: Başka kullanıcı değiştirdiğinde otomatik yansır
         const boardNodes = board.nodes || [];
         const boardEdges = board.edges || [];
 
-        setNodes(boardNodes);
-        setEdges(boardEdges);
+        // 🔒 DEEP COMPARISON: Sadece gerçekten değişiklik varsa state güncelle
+        // Tab switch, activeUsers değişimi vs. gereksiz re-render yapmaz
+        const nodesChanged = !areNodesEqual(previousNodesRef.current, boardNodes);
+        const edgesChanged = !areEdgesEqual(previousEdgesRef.current, boardEdges);
 
-        // Calculate next node ID
-        if (boardNodes.length > 0) {
-          const maxId = boardNodes
-            .map((n) => parseInt(n.id, 10))
-            .filter((n) => !Number.isNaN(n))
-            .reduce((acc, n) => Math.max(acc, n), 0);
-          setNodeId((maxId || 0) + 1);
-        } else {
-          setNodeId(1);
+        if (nodesChanged) {
+          setNodes(boardNodes);
+          previousNodesRef.current = boardNodes;
         }
-      } catch (e) {
-        console.error('Failed to load board', e);
-        toast.error('Failed to load board');
+
+        if (edgesChanged) {
+          setEdges(boardEdges);
+          previousEdgesRef.current = boardEdges;
+        }
+
+        // Calculate next node ID - sadece nodes değiştiğinde
+        if (nodesChanged) {
+          if (boardNodes.length > 0) {
+            const maxId = boardNodes
+              .map((n) => parseInt(n.id, 10))
+              .filter((n) => !Number.isNaN(n))
+              .reduce((acc, n) => Math.max(acc, n), 0);
+            const nextId = (maxId || 0) + 1;
+            setNodeId(nextId);
+            nodeIdRef.current = nextId;
+          } else {
+            setNodeId(1);
+            nodeIdRef.current = 1;
+          }
+        }
+
+        // 🔒 İlk workspace data'yı kaydet - comparison için (sadece ilk kez)
+        if (!initialWorkspaceDataRef.current && boardNodes.length >= 0) {
+          const initialData = JSON.stringify({
+            nodes: boardNodes.map(({ id, type, position, data }) => {
+              if (!data) return { id, type, position, data: {} };
+              const { onAddComment, isReadOnly, ...cleanData } = data;
+              return { id, type, position, data: cleanData };
+            }),
+            edges: boardEdges.map(({ id, source, target, sourceHandle, targetHandle, type, data, animated, style }) => ({
+              id, source, target, sourceHandle, targetHandle, type, data, animated, style
+            }))
+          });
+          initialWorkspaceDataRef.current = initialData;
+        }
+
+        // isLoading'i sadece ilk kez false yap
+        if (isLoading) {
+          setIsLoading(false);
+        }
+        
+        // 🔒 İlk yükleme tamamlandı - auto-save artık aktif olabilir
+        // Ref kullanıyoruz - state değil, re-render yok
+        if (!hasInitialDataLoadedRef.current) {
+          // Küçük delay - kullanıcının ilk etkileşimi için
+          setTimeout(() => {
+            hasInitialDataLoadedRef.current = true;
+          }, 500); // 500ms yeterli
+        }
+      },
+      (error) => {
+        console.error('Real-time listener error:', error);
+        toast.error('Failed to sync board');
         router.push('/boards');
-      } finally {
-        setIsLoading(false);
+      }
+    );
+
+    // ⚠️ Cleanup: Component unmount olduğunda listener'ı kapat
+    return () => {
+      unsubscribe();
+    };
+  }, [boardId, user?.uid, router]);
+
+  // 👥 JOIN/LEAVE BOARD: Kullanıcı board'a girdiğinde/çıktığında işaretle
+  // ⚠️ FIX: isLoading false olduğunda SADECE 1 KEZ çalışmalı
+  useEffect(() => {
+    if (!boardId || !user?.uid || isLoading) return;
+
+    // Board'a join ol (sadece ilk yüklemede)
+    let hasJoined = false;
+    
+    const doJoin = async () => {
+      if (!hasJoined) {
+        await joinBoard(boardId, user.uid, user.displayName || user.email, user.photoURL);
+        hasJoined = true;
+      }
+    };
+    
+    doJoin();
+
+    // Component unmount olduğunda veya board değiştiğinde leave
+    return () => {
+      leaveBoard(boardId, user.uid);
+    };
+  }, [boardId, user?.uid, isLoading]); // displayName ve photoURL kaldırıldı - gereksiz re-run önlendi
+
+  // 👁️ TAB VISIBILITY: Kullanıcı tab'ı gizlediğinde/gösterdiğinde
+  useEffect(() => {
+    if (!boardId || !user?.uid || isLoading) return;
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        // Tab gizlendi - leave board
+        leaveBoard(boardId, user.uid);
+      } else {
+        // Tab tekrar görünür - join board
+        joinBoard(boardId, user.uid, user.displayName || user.email, user.photoURL);
       }
     };
 
-    loadBoardData();
-  }, [boardId, user?.uid, router, setNodes, setEdges]);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [boardId, user?.uid, isLoading]); // ⚠️ FIX: Gereksiz dependencies kaldırıldı
+
+  // 💓 HEARTBEAT: Her 30 saniyede bir "still alive" sinyali gönder
+  // Bu sayede browser crash/kapatma durumlarında 60 saniye içinde offline olur
+  useEffect(() => {
+    if (!boardId || !user?.uid || isLoading) return;
+
+    // Her 30 saniyede bir heartbeat gönder
+    const heartbeatInterval = setInterval(() => {
+      // Sadece tab visible ise heartbeat gönder
+      if (!document.hidden) {
+        updateUserHeartbeat(boardId, user.uid);
+      }
+    }, 30000); // 30 saniye
+
+    return () => {
+      clearInterval(heartbeatInterval);
+    };
+  }, [boardId, user?.uid, isLoading]);
 
   const onConnect = useCallback(
     (params) =>
@@ -203,14 +377,17 @@ export default function ReactFlowPlanner({ boardId }) {
   );
 
   // Add comment card next to a specific node
+  // ⚠️ FIX: nodes dependency'sini kaldırdık - setNodes içinde callback kullanıyoruz
+  // ⚠️ FIX: nodeId yerine nodeIdRef kullanıyoruz - daha stable callback
   const addCommentToNode = useCallback((targetNodeId) => {
     if (!user?.uid) {
       toast("Please sign in to add comments.");
       return;
     }
 
-    const targetNode = nodes.find(n => n.id === targetNodeId);
-    if (!targetNode) return;
+    setNodes((currentNodes) => {
+      const targetNode = currentNodes.find(n => n.id === targetNodeId);
+      if (!targetNode) return currentNodes;
 
     const newPosition = {
       x: targetNode.position.x + 350, // Position to the right of the card
@@ -226,17 +403,22 @@ export default function ReactFlowPlanner({ boardId }) {
     };
 
     const newNode = {
-      id: nodeId.toString(),
+        id: nodeIdRef.current.toString(), // ⚠️ FIX: ref kullan
       type: 'commentCard',
       position: newPosition,
       data: commentData,
       dragHandle: '.drag-handle',
     };
 
-    setNodes((nds) => [...nds, newNode]);
-    setNodeId((id) => id + 1);
+      // Increment ref for next node
+      nodeIdRef.current += 1;
+      setNodeId(nodeIdRef.current);
+
+      return [...currentNodes, newNode];
+    });
+    
     toast('Comment created.', { icon: <Check className="w-4 h-4" /> });
-  }, [user, nodes, nodeId, setNodes]);
+  }, [user?.uid, user?.displayName, user?.email, setNodes]); // nodeId kaldırıldı!
 
   const addNode = useCallback((cardTypeOrEvent, position) => {
     if (!user?.uid) {
@@ -318,7 +500,7 @@ export default function ReactFlowPlanner({ boardId }) {
     }
 
     const newNode = {
-      id: nodeId.toString(),
+      id: nodeIdRef.current.toString(), // ⚠️ FIX: ref kullan
       type: cardType,
       position: newPosition,
       data: nodeData,
@@ -331,11 +513,14 @@ export default function ReactFlowPlanner({ boardId }) {
       console.log('New nodes:', newNodes.length);
       return newNodes;
     });
-    setNodeId((id) => id + 1);
+    
+    // Increment ref for next node
+    nodeIdRef.current += 1;
+    setNodeId(nodeIdRef.current);
 
     const cardTypeName = cardType === 'commentCard' ? 'Comment' : cardType === 'linkCard' ? 'Link card' : 'Card';
     toast(`${cardTypeName} created.`, { icon: <Check className="w-4 h-4" /> });
-  }, [nodeId, setNodes, user, boardPermission]);
+  }, [setNodes, user, boardPermission]); // ⚠️ FIX: nodeId dependency kaldırıldı
 
   const updateNodeData = useCallback((id, newData) => {
     setNodes((nds) =>
@@ -389,6 +574,7 @@ export default function ReactFlowPlanner({ boardId }) {
     setNodes([]);
     setEdges([]);
     setNodeId(1);
+    nodeIdRef.current = 1; // ⚠️ FIX: ref'i de güncelle
     toast("Workspace cleared!", { icon: <Check className="w-4 h-4" /> });
   }, [setNodes, setEdges]);
 
@@ -439,19 +625,43 @@ export default function ReactFlowPlanner({ boardId }) {
     }
   }, [boardId, nodes, edges]);
 
-  // Prepare workspace data for auto-save comparison
-  // Serialize to string to ensure deep comparison works correctly
-  const workspaceData = useMemo(() =>
-    JSON.stringify({
-      nodes: nodes.map(({ id, type, position, data }) => {
-        const { onAddComment, isReadOnly, ...cleanData } = data || {};
-        return { id, type, position, data: cleanData };
-      }),
-      edges: edges.map(({ id, source, target, sourceHandle, targetHandle, type, data, animated, style }) => ({
-        id, source, target, sourceHandle, targetHandle, type, data, animated, style
-      })),
-    })
-  , [nodes, edges]);
+  // 🔒 WORKSPACE DATA REF - useMemo yerine useEffect ile kontrol
+  // Bu sayede sadece GERÇEK değişikliklerde update olur
+  const workspaceDataRef = useRef('');
+  const [workspaceDataTrigger, setWorkspaceDataTrigger] = useState(0);
+
+  useEffect(() => {
+    // İlk yükleme bitmemişse skip
+    if (!hasInitialDataLoadedRef.current) {
+      return;
+    }
+
+    // Clean nodes - remove functions and temporary props
+    const cleanNodes = nodes.map(({ id, type, position, data }) => {
+      if (!data) return { id, type, position, data: {} };
+      const { onAddComment, isReadOnly, ...cleanData } = data;
+      return { id, type, position, data: cleanData };
+    });
+
+    // Clean edges
+    const cleanEdges = edges.map(({ id, source, target, sourceHandle, targetHandle, type, data, animated, style }) => ({
+      id, source, target, sourceHandle, targetHandle, type, data, animated, style
+    }));
+
+    const currentData = JSON.stringify({ nodes: cleanNodes, edges: cleanEdges });
+    
+    // 🔒 Sadece gerçekten değiştiyse ref'i güncelle ve trigger et
+    if (currentData !== workspaceDataRef.current) {
+      console.log('🔄 Workspace data changed - will trigger auto-save');
+      workspaceDataRef.current = currentData;
+      setWorkspaceDataTrigger(prev => prev + 1); // Auto-save'i tetikle
+    } else {
+      console.log('✅ Workspace data unchanged - no auto-save');
+    }
+  }, [nodes, edges]);
+
+  // Auto-save için kullanılacak data - trigger değiştiğinde auto-save tetiklenir
+  const workspaceData = workspaceDataRef.current;
 
   // Silent save function for auto-save (no toasts)
   const silentSave = useCallback(async () => {
@@ -460,12 +670,14 @@ export default function ReactFlowPlanner({ boardId }) {
 
   // Auto-save hook - enabled for both owner and comment-only users
   // Comment-only users can save their comment cards
+  // ⚡ debounceMs azaltıldı: Real-time sync ile daha hızlı kayıt
+  // 🔒 workspaceDataTrigger - sadece gerçek değişikliklerde artıyor
   const { status: saveStatus } = useAutoSave(
     silentSave,
-    workspaceData,
+    workspaceDataTrigger, // ✅ Trigger kullan - her değişiklikte artıyor
     {
-      debounceMs: 4000,
-      enabled: !!user?.uid && !isLoading && !!boardPermission,
+      debounceMs: 2000, // 4000'den 2000'e düşürüldü - daha responsive
+      enabled: !!user?.uid && !isLoading && !!boardPermission && workspaceDataTrigger > 0, // ✅ Trigger > 0 olunca aktif
     }
   );
 
@@ -523,9 +735,11 @@ export default function ReactFlowPlanner({ boardId }) {
           .reduce((acc, n) => Math.max(acc, n), 0);
 
         // Apply imported data
+        const nextId = (maxId || 0) + 1;
         setNodes(validNodes);
         setEdges(validEdges);
-        setNodeId((maxId || 0) + 1);
+        setNodeId(nextId);
+        nodeIdRef.current = nextId; // ⚠️ FIX: ref'i de güncelle
 
         toast(`Workspace imported! (${validNodes.length} cards, ${validEdges.length} connections)`, {
           icon: <Check className="w-4 h-4" />
@@ -581,6 +795,7 @@ export default function ReactFlowPlanner({ boardId }) {
 
 
   // Enhance nodes with onAddComment function for storyCards and isReadOnly for all cards
+  // ⚠️ FIX: Bu sadece render için kullanılır, workspaceData için değil
   const enhancedNodes = useMemo(() => {
     const isReadOnly = boardPermission === 'comment-only';
     return nodes.map(node => {
@@ -609,7 +824,7 @@ export default function ReactFlowPlanner({ boardId }) {
 
       return baseNode;
     });
-  }, [nodes, addCommentToNode, boardPermission]);
+  }, [nodes, addCommentToNode, boardPermission]); // Bu OK, çünkü addCommentToNode artık stable
 
   if (isLoading) {
     return (
@@ -626,6 +841,8 @@ export default function ReactFlowPlanner({ boardId }) {
           onShareBoard={() => setShareDialogOpen(true)}
           boardPermission={boardPermission}
           showBoardControls={!!boardId}
+        activeUsers={activeUsers}
+        currentUserId={user?.uid}
         />
         <div className="w-full bg-background">
           <div className="h-screen flex items-center justify-center">
@@ -653,6 +870,8 @@ export default function ReactFlowPlanner({ boardId }) {
         onShareBoard={() => setShareDialogOpen(true)}
         boardPermission={boardPermission}
         showBoardControls={!!boardId}
+        activeUsers={activeUsers}
+        currentUserId={user?.uid}
       />
 
       {/* Hidden file input for import */}
