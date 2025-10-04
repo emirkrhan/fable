@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useState, useRef, useEffect } from "react";
-import { Save, Plus, LogOut, Download, Trash2, User, Settings, FileText, Upload, Link, ChevronDown, UserPlus, Calendar as CalendarIcon, Loader, Check, Type, MessageSquare, Share2, ArrowLeft, Home } from "lucide-react";
+import { Save, Plus, LogOut, Download, Trash2, User, Settings, FileText, Upload, Link, ChevronDown, UserPlus, Calendar as CalendarIcon, Loader, Loader2, Check, Type, MessageSquare, Share2, ArrowLeft, Home, Cloud, CloudOff, CheckCircle2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "./ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar";
@@ -131,6 +131,26 @@ function TopNav({
         )}
 
         <div className="flex items-center gap-2 pointer-events-auto">
+          {/* Auto-save status indicator - Google Docs style - Always visible */}
+          <div className="relative group">
+            <div className="flex items-center gap-2">
+              {saveStatus === 'saving' ? (
+                <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+              ) : saveStatus === 'error' ? (
+                <CloudOff className="w-5 h-5 text-destructive" />
+              ) : (
+                <div className="relative">
+                  <Cloud className="w-5 h-5 text-muted-foreground" strokeWidth={2}/>
+                  <Check className="w-2.5 h-2.5 absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-green-600" strokeWidth={4} />
+                </div>
+              )}
+            </div>
+            {/* Tooltip on hover */}
+            <div className="absolute top-full right-0 mt-1 px-2 py-1 bg-popover border border-border rounded text-[10px] text-muted-foreground whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none shadow-md z-50">
+              {saveStatus === 'saving' ? 'Saving...' : saveStatus === 'error' ? 'Save failed' : 'All changes saved'}
+            </div>
+          </div>
+
           <div className="relative" ref={cardDropdownRef}>
             <Button
               onClick={() => {
@@ -250,25 +270,6 @@ function TopNav({
             </Button>
           )}
 
-          <Button onClick={onSave} variant="secondary" className="gap-1 text-xs" disabled={saveStatus === 'saving' || boardPermission === 'comment-only'}>
-            {saveStatus === 'saving' ? (
-              <>
-                <Loader className="w-3.5 h-3.5 animate-spin" />
-                Saving...
-              </>
-            ) : saveStatus === 'saved' ? (
-              <>
-                <Check className="w-3.5 h-3.5 text-green-600" />
-                Saved
-              </>
-            ) : (
-              <>
-                <Save className="w-3.5 h-3.5" />
-                Save
-              </>
-            )}
-          </Button>
-
           {user ? (
             <div className="relative" ref={dropdownRef}>
               <Avatar
@@ -296,9 +297,21 @@ function TopNav({
                   </div>
 
                   {/* Workspace Actions */}
-                  <div className="py-1">
+                  <div className="py-1 px-1">
                     <button
-                      className="w-full px-2 py-1.5 mx-1 text-xs text-left hover:bg-accent hover:text-accent-foreground flex items-center gap-2 transition-colors rounded-sm"
+                      className="w-full px-2 py-1.5 text-xs text-left hover:bg-accent hover:text-accent-foreground flex items-center gap-2 transition-colors rounded-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                      onClick={() => {
+                        onSave();
+                        setIsDropdownOpen(false);
+                      }}
+                      disabled={boardPermission === 'comment-only'}
+                    >
+                      <Save className="w-3.5 h-3.5" />
+                      Save board
+                    </button>
+
+                    <button
+                      className="w-full px-2 py-1.5 text-xs text-left hover:bg-accent hover:text-accent-foreground flex items-center gap-2 transition-colors rounded-sm"
                       onClick={() => {
                         onDownloadWorkspace();
                         setIsDropdownOpen(false);
@@ -309,7 +322,7 @@ function TopNav({
                     </button>
 
                     <button
-                      className="w-full px-2 py-1.5 mx-1 text-xs text-left hover:bg-accent hover:text-accent-foreground flex items-center gap-2 transition-colors rounded-sm"
+                      className="w-full px-2 py-1.5 text-xs text-left hover:bg-accent hover:text-accent-foreground flex items-center gap-2 transition-colors rounded-sm"
                       onClick={() => {
                         onImportWorkspace();
                         setIsDropdownOpen(false);
@@ -320,7 +333,7 @@ function TopNav({
                     </button>
 
                     <button
-                      className="w-full px-2 py-1.5 mx-1 text-xs text-left hover:bg-accent hover:text-accent-foreground flex items-center gap-2 transition-colors rounded-sm"
+                      className="w-full px-2 py-1.5 text-xs text-left hover:bg-accent hover:text-accent-foreground flex items-center gap-2 transition-colors rounded-sm"
                       onClick={() => {
                         setShowClearDialog(true);
                         setIsDropdownOpen(false);
@@ -331,27 +344,27 @@ function TopNav({
                     </button>
                   </div>
 
-                  <div className="border-t border-border py-1">
+                  <div className="border-t border-border py-1 px-1">
                     {/* Future options placeholder */}
-                    <button className="w-full px-2 py-1.5 mx-1 text-xs text-left cursor-not-allowed opacity-50 flex items-center gap-2 rounded-sm" disabled>
+                    <button className="w-full px-2 py-1.5 text-xs text-left cursor-not-allowed opacity-50 flex items-center gap-2 rounded-sm" disabled>
                       <Settings className="w-3.5 h-3.5" />
                       Settings
                     </button>
 
-                    <button className="w-full px-2 py-1.5 mx-1 text-xs text-left cursor-not-allowed opacity-50 flex items-center gap-2 rounded-sm" disabled>
+                    <button className="w-full px-2 py-1.5 text-xs text-left cursor-not-allowed opacity-50 flex items-center gap-2 rounded-sm" disabled>
                       <FileText className="w-3.5 h-3.5" />
                       Export to PDF
                     </button>
 
-                    <button className="w-full px-2 py-1.5 mx-1 text-xs text-left cursor-not-allowed opacity-50 flex items-center gap-2 rounded-sm" disabled>
+                    <button className="w-full px-2 py-1.5 text-xs text-left cursor-not-allowed opacity-50 flex items-center gap-2 rounded-sm" disabled>
                       <User className="w-3.5 h-3.5" />
                       Account
                     </button>
                   </div>
 
-                  <div className="border-t border-border py-1">
+                  <div className="border-t border-border py-1 px-1">
                     <button
-                      className="w-full px-2 py-1.5 mx-1 text-xs text-left hover:bg-destructive/10 hover:text-destructive flex items-center gap-2 transition-colors rounded-sm"
+                      className="w-full px-2 py-1.5 text-xs text-left hover:bg-destructive/10 hover:text-destructive flex items-center gap-2 transition-colors rounded-sm"
                       onClick={() => {
                         logout();
                         setIsDropdownOpen(false);

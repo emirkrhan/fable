@@ -159,6 +159,103 @@ export default function BoardList() {
     );
   }
 
+  const BoardCard = ({ board }) => {
+    return (
+      <div
+        className="cursor-pointer hover:border-primary/40 transition-all group relative bg-card border border-border rounded-lg shadow-sm"
+        onClick={() => router.push(`/boards/${board.id}`)}
+      >
+        <div className="p-3">
+          <div className="flex items-center justify-between gap-2">
+            {/* Board Icon + Name */}
+            <div className="flex items-center gap-2 flex-1 min-w-0">
+              <div className="w-7 h-7 rounded-md bg-primary/10 flex items-center justify-center flex-shrink-0">
+                <FileText className="w-3.5 h-3.5 text-primary" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <h3 className="text-sm font-medium truncate leading-tight text-card-foreground">{board.name}</h3>
+                <p className="text-[11px] mt-0.5 text-muted-foreground">
+                  {formatDate(board.createdAt)}
+                </p>
+              </div>
+            </div>
+
+            {/* Three dots menu - Only for owners */}
+            {board.isOwner && (
+              <div className="flex-shrink-0 relative" ref={(el) => (menuRefs.current[board.id] = el)}>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setOpenMenuId(openMenuId === board.id ? null : board.id);
+                  }}
+                  className="p-1 hover:bg-accent rounded transition-colors"
+                  title="More options"
+                >
+                  <MoreVertical className="w-4 h-4 text-muted-foreground" />
+                </button>
+                {openMenuId === board.id && (
+                  <div className="absolute right-0 top-full mt-1 w-36 bg-popover border border-border rounded-md shadow-lg z-50 animate-in fade-in-0 zoom-in-95">
+                    <div className="py-1 px-1">
+                      <button
+                        className="w-full px-2 py-1.5 text-xs text-left hover:bg-accent hover:text-accent-foreground flex items-center gap-2 transition-colors rounded-sm"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setBoardToEdit(board);
+                          setEditBoardName(board.name);
+                          setEditDialogOpen(true);
+                          setOpenMenuId(null);
+                        }}
+                      >
+                        <Edit2 className="w-3.5 h-3.5" />
+                        Rename
+                      </button>
+                      <button
+                        className="w-full px-2 py-1.5 text-xs text-left hover:bg-destructive/10 hover:text-destructive flex items-center gap-2 transition-colors rounded-sm"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setBoardToDelete(board);
+                          setDeleteDialogOpen(true);
+                          setOpenMenuId(null);
+                        }}
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Badge - For shared boards */}
+            {!board.isOwner && (
+              <div className="flex-shrink-0">
+                <Badge variant="outline" className="text-[10px] h-4 px-1.5 gap-0.5">
+                  <Users className="w-2.5 h-2.5" />
+                  Shared
+                </Badge>
+              </div>
+            )}
+          </div>
+
+          {/* Shared info */}
+          {board.sharedWith && board.sharedWith.length > 0 && board.isOwner && (
+            <div className="mt-2 text-[10px] text-muted-foreground">
+              Shared with {board.sharedWith.length} {board.sharedWith.length === 1 ? 'person' : 'people'}
+            </div>
+          )}
+
+          {/* Owner info - For shared boards */}
+          {!board.isOwner && board.ownerInfo && (
+            <div className="mt-2 text-[10px] text-muted-foreground">
+              Shared by {board.ownerInfo.displayName || board.ownerInfo.email}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="min-h-screen bg-background">
       {/* Navbar - Same style as TopNav */}
@@ -197,9 +294,9 @@ export default function BoardList() {
                     </div>
 
                     {/* Log out */}
-                    <div className="py-1">
+                    <div className="py-1 px-1">
                       <button
-                        className="w-full px-2 py-1.5 mx-1 text-xs text-left hover:bg-accent hover:text-accent-foreground flex items-center gap-2 transition-colors rounded-sm"
+                        className="w-full px-2 py-1.5 text-xs text-left hover:bg-accent hover:text-accent-foreground flex items-center gap-2 transition-colors rounded-sm"
                         onClick={() => {
                           logout();
                           setIsAvatarDropdownOpen(false);
@@ -241,95 +338,30 @@ export default function BoardList() {
             </Button>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-            {boards.map((board) => (
-              <div
-                key={board.id}
-                className="cursor-pointer hover:border-primary/40 transition-all group relative bg-card border border-border rounded-lg shadow-sm"
-                onClick={() => router.push(`/boards/${board.id}`)}
-              >
-                <div className="p-3">
-                  <div className="flex items-center justify-between gap-2">
-                    {/* Board Icon + Name */}
-                    <div className="flex items-center gap-2 flex-1 min-w-0">
-                      <div className="w-7 h-7 rounded-md bg-primary/10 flex items-center justify-center flex-shrink-0">
-                        <FileText className="w-3.5 h-3.5 text-primary" />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <h3 className="text-sm font-medium truncate leading-tight text-card-foreground">{board.name}</h3>
-                        <p className="text-[11px] mt-0.5 text-muted-foreground">
-                          {formatDate(board.createdAt)}
-                        </p>
-                      </div>
-                    </div>
-
-                    {/* Three dots menu - Only for owners */}
-                    {board.isOwner && (
-                      <div className="flex-shrink-0 relative" ref={(el) => (menuRefs.current[board.id] = el)}>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setOpenMenuId(openMenuId === board.id ? null : board.id);
-                          }}
-                          className="p-1 hover:bg-accent rounded transition-colors"
-                          title="More options"
-                        >
-                          <MoreVertical className="w-4 h-4 text-muted-foreground" />
-                        </button>
-                        {openMenuId === board.id && (
-                          <div className="absolute right-0 top-full mt-1 w-36 bg-popover border border-border rounded-md shadow-lg z-50 animate-in fade-in-0 zoom-in-95">
-                            <div className="py-1">
-                              <button
-                                className="w-full px-3 py-1.5 text-xs text-left hover:bg-accent hover:text-accent-foreground flex items-center gap-2 transition-colors"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setBoardToEdit(board);
-                                  setEditBoardName(board.name);
-                                  setEditDialogOpen(true);
-                                  setOpenMenuId(null);
-                                }}
-                              >
-                                <Edit2 className="w-3.5 h-3.5" />
-                                Rename
-                              </button>
-                              <button
-                                className="w-full px-3 py-1.5 text-xs text-left hover:bg-destructive/10 hover:text-destructive flex items-center gap-2 transition-colors"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setBoardToDelete(board);
-                                  setDeleteDialogOpen(true);
-                                  setOpenMenuId(null);
-                                }}
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                                Delete
-                              </button>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    {/* Badge - For shared boards */}
-                    {!board.isOwner && (
-                      <div className="flex-shrink-0">
-                        <Badge variant="outline" className="text-[10px] h-4 px-1.5 gap-0.5">
-                          <Users className="w-2.5 h-2.5" />
-                          Shared
-                        </Badge>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Shared info */}
-                  {board.sharedWith && board.sharedWith.length > 0 && board.isOwner && (
-                    <div className="mt-2 text-[10px] text-muted-foreground">
-                      Shared with {board.sharedWith.length} {board.sharedWith.length === 1 ? 'person' : 'people'}
-                    </div>
-                  )}
+          <div className="space-y-6">
+            {/* My Boards Section */}
+            {boards.filter(b => b.isOwner).length > 0 && (
+              <div>
+                <h2 className="text-sm font-semibold text-foreground mb-2.5 px-1">My Boards</h2>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+                  {boards.filter(b => b.isOwner).map((board) => (
+                    <BoardCard key={board.id} board={board} />
+                  ))}
                 </div>
               </div>
-            ))}
+            )}
+
+            {/* Shared With Me Section */}
+            {boards.filter(b => !b.isOwner).length > 0 && (
+              <div>
+                <h2 className="text-sm font-semibold text-foreground mb-2.5 px-1">Shared With Me</h2>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+                  {boards.filter(b => !b.isOwner).map((board) => (
+                    <BoardCard key={board.id} board={board} />
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
 

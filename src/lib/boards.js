@@ -11,7 +11,10 @@ import {
   where,
   orderBy,
   Timestamp,
-  serverTimestamp
+  serverTimestamp,
+  runTransaction, // ✅ FIX #3: Transaction import eklendi
+  arrayUnion, // ✅ FIX #5: Atomic array operations
+  arrayRemove
 } from 'firebase/firestore';
 import { db } from './firebase';
 
@@ -29,7 +32,8 @@ export async function createBoard(userId, boardName) {
       updatedAt: Timestamp.now(),
       nodes: [],
       edges: [],
-      sharedWith: []
+      sharedWith: [],
+      sharedUserIds: [] // ✅ FIX #5: Yeni board'larda baştan var
     };
 
     const docRef = await addDoc(collection(db, BOARDS_COLLECTION), boardData);
@@ -43,6 +47,7 @@ export async function createBoard(userId, boardName) {
 
 /**
  * Get all boards for a user (owned + shared)
+ * ✅ FIX #5: Server-side query kullanarak N+1 problem çözüldü
  */
 export async function getUserBoards(userId) {
   try {
@@ -59,24 +64,43 @@ export async function getUserBoards(userId) {
       isOwner: true
     }));
 
-    // Get shared boards
+    // ✅ FIX #5: sharedUserIds kullanarak server-side filtreleme
+    // Artık TÜM board'ları çekmiyor, sadece userId'si olan board'ları getiriyor
     const sharedQuery = query(
       collection(db, BOARDS_COLLECTION),
-      where('sharedWith', 'array-contains', { userId, permission: 'comment-only' })
+      where('sharedUserIds', 'array-contains', userId),
+      orderBy('updatedAt', 'desc')
     );
+    const sharedSnapshot = await getDocs(sharedQuery);
 
-    // Note: Firestore array-contains doesn't work with objects directly
-    // We need to get all boards and filter manually
-    const allBoardsSnapshot = await getDocs(collection(db, BOARDS_COLLECTION));
-    const sharedBoards = allBoardsSnapshot.docs
+    // Owner olduğu board'ları filtrele (shared query owner'ları da getirebilir)
+    const sharedBoards = sharedSnapshot.docs
       .map(doc => ({ id: doc.id, ...doc.data() }))
-      .filter(board =>
-        board.ownerId !== userId &&
-        board.sharedWith?.some(share => share.userId === userId)
-      )
+      .filter(board => board.ownerId !== userId)
       .map(board => ({ ...board, isOwner: false }));
 
-    return [...ownedBoards, ...sharedBoards];
+    // Fetch owner info for shared boards
+    const ownerIds = [...new Set(sharedBoards.map(board => board.ownerId))];
+    const ownerInfoMap = {};
+
+    if (ownerIds.length > 0) {
+      // ⚠️ Burada hala N+1 var ama az sayıda unique owner olur (genelde)
+      // İsteğe bağlı: Firestore 'in' query ile optimize edilebilir
+      const usersSnapshot = await getDocs(collection(db, 'users'));
+      usersSnapshot.docs.forEach(doc => {
+        if (ownerIds.includes(doc.id)) {
+          ownerInfoMap[doc.id] = doc.data();
+        }
+      });
+    }
+
+    // Add owner info to shared boards
+    const sharedBoardsWithOwner = sharedBoards.map(board => ({
+      ...board,
+      ownerInfo: ownerInfoMap[board.ownerId] || null
+    }));
+
+    return [...ownedBoards, ...sharedBoardsWithOwner];
   } catch (error) {
     console.error('Error getting user boards:', error);
     throw error;
@@ -154,6 +178,7 @@ export async function deleteBoard(boardId) {
 
 /**
  * Share board with a user by email
+ * ✅ FIX #5: sharedUserIds field'ını da güncelle (atomic operation)
  */
 export async function shareBoardWithUser(boardId, userEmail, currentUserId) {
   try {
@@ -165,7 +190,7 @@ export async function shareBoardWithUser(boardId, userEmail, currentUserId) {
     const usersSnapshot = await getDocs(usersQuery);
 
     if (usersSnapshot.empty) {
-      throw new Error('User not found with this email');
+      return { success: false, error: 'User not found with this email' };
     }
 
     const targetUser = usersSnapshot.docs[0];
@@ -173,7 +198,7 @@ export async function shareBoardWithUser(boardId, userEmail, currentUserId) {
 
     // Check if user is trying to share with themselves
     if (targetUserId === currentUserId) {
-      throw new Error('Cannot share board with yourself');
+      return { success: false, error: 'Cannot share board with yourself' };
     }
 
     // Get current board
@@ -181,7 +206,7 @@ export async function shareBoardWithUser(boardId, userEmail, currentUserId) {
 
     // Check if already shared
     if (board.sharedWith?.some(share => share.userId === targetUserId)) {
-      throw new Error('Board already shared with this user');
+      return { success: false, error: 'Board already shared with this user' };
     }
 
     // Add to sharedWith array
@@ -196,20 +221,23 @@ export async function shareBoardWithUser(boardId, userEmail, currentUserId) {
       }
     ];
 
+    // ✅ FIX #5: Her iki field'ı da güncelle - sharedUserIds atomic operation ile
     await updateDoc(boardRef, {
       sharedWith: newSharedWith,
+      sharedUserIds: arrayUnion(targetUserId), // ✅ Atomic - race condition yok
       updatedAt: Timestamp.now()
     });
 
-    return true;
+    return { success: true };
   } catch (error) {
     console.error('Error sharing board:', error);
-    throw error;
+    return { success: false, error: error.message || 'Failed to share board' };
   }
 }
 
 /**
  * Remove user from shared board
+ * ✅ FIX #5: sharedUserIds field'ını da güncelle (atomic operation)
  */
 export async function unshareBoard(boardId, userId) {
   try {
@@ -217,8 +245,11 @@ export async function unshareBoard(boardId, userId) {
     const newSharedWith = board.sharedWith?.filter(share => share.userId !== userId) || [];
 
     const boardRef = doc(db, BOARDS_COLLECTION, boardId);
+
+    // ✅ FIX #5: Her iki field'ı da güncelle
     await updateDoc(boardRef, {
       sharedWith: newSharedWith,
+      sharedUserIds: arrayRemove(userId), // ✅ Atomic - race condition yok
       updatedAt: Timestamp.now()
     });
 
@@ -245,48 +276,51 @@ export function getBoardPermission(board, userId) {
 
 /**
  * Join board - Mark user as active
- * Uses server timestamp for accurate presence tracking
+ * ✅ FIX #3: Transaction kullanarak race condition önlendi
  */
 export async function joinBoard(boardId, userId, userName, photoURL) {
   try {
     const boardRef = doc(db, BOARDS_COLLECTION, boardId);
-    const board = await getBoard(boardId);
-    
-    if (!board) return false;
 
-    // Mevcut aktif kullanıcıları al
-    const activeUsers = board.activeUsers || [];
-    
-    // Kullanıcı zaten aktif mi?
-    const existingUserIndex = activeUsers.findIndex(u => u.userId === userId);
-    
-    // Mevcut kullanıcının rengini koru veya yeni renk oluştur
-    const userColor = existingUserIndex >= 0 
-      ? activeUsers[existingUserIndex].color 
-      : getRandomUserColor();
-    
-    const newUser = {
-      userId,
-      userName: userName || 'Anonymous',
-      photoURL: photoURL || '',
-      color: userColor,
-      lastSeen: Timestamp.now() // ⚡ Server timestamp kullan - daha güvenilir
-    };
-    
-    let updatedActiveUsers;
-    if (existingUserIndex >= 0) {
-      // Varsa güncelle (rengi koru)
-      updatedActiveUsers = [...activeUsers];
-      updatedActiveUsers[existingUserIndex] = newUser;
-    } else {
-      // Yoksa ekle
-      updatedActiveUsers = [...activeUsers, newUser];
-    }
-    
-    await updateDoc(boardRef, {
-      activeUsers: updatedActiveUsers
+    // ✅ Transaction ile atomic operation - eş zamanlı yazma güvenli
+    await runTransaction(db, async (transaction) => {
+      const boardDoc = await transaction.get(boardRef);
+
+      if (!boardDoc.exists()) {
+        throw new Error('Board not found');
+      }
+
+      const activeUsers = boardDoc.data().activeUsers || [];
+      const existingUserIndex = activeUsers.findIndex(u => u.userId === userId);
+
+      // Mevcut kullanıcının rengini koru veya yeni renk oluştur
+      const userColor = existingUserIndex >= 0
+        ? activeUsers[existingUserIndex].color
+        : getRandomUserColor();
+
+      const newUser = {
+        userId,
+        userName: userName || 'Anonymous',
+        photoURL: photoURL || '',
+        color: userColor,
+        lastSeen: Timestamp.now()
+      };
+
+      let updatedActiveUsers;
+      if (existingUserIndex >= 0) {
+        // Varsa güncelle (rengi koru)
+        updatedActiveUsers = [...activeUsers];
+        updatedActiveUsers[existingUserIndex] = newUser;
+      } else {
+        // Yoksa ekle
+        updatedActiveUsers = [...activeUsers, newUser];
+      }
+
+      transaction.update(boardRef, {
+        activeUsers: updatedActiveUsers
+      });
     });
-    
+
     return true;
   } catch (error) {
     console.error('Error joining board:', error);
@@ -296,34 +330,40 @@ export async function joinBoard(boardId, userId, userName, photoURL) {
 
 /**
  * Update heartbeat - Keep user alive without full rejoin
- * Lightweight operation - only updates timestamp
+ * ✅ FIX #3: Transaction ile race condition önlendi
  */
 export async function updateUserHeartbeat(boardId, userId) {
   try {
     const boardRef = doc(db, BOARDS_COLLECTION, boardId);
-    const board = await getBoard(boardId);
-    
-    if (!board) return false;
 
-    const activeUsers = board.activeUsers || [];
-    const userIndex = activeUsers.findIndex(u => u.userId === userId);
-    
-    if (userIndex === -1) {
-      // User not in list - they need to join first
-      return false;
-    }
-    
-    // Sadece timestamp'i güncelle - minimal write operation
-    const updatedActiveUsers = [...activeUsers];
-    updatedActiveUsers[userIndex] = {
-      ...updatedActiveUsers[userIndex],
-      lastSeen: Timestamp.now()
-    };
-    
-    await updateDoc(boardRef, {
-      activeUsers: updatedActiveUsers
+    // ✅ Transaction ile atomic operation
+    await runTransaction(db, async (transaction) => {
+      const boardDoc = await transaction.get(boardRef);
+
+      if (!boardDoc.exists()) {
+        throw new Error('Board not found');
+      }
+
+      const activeUsers = boardDoc.data().activeUsers || [];
+      const userIndex = activeUsers.findIndex(u => u.userId === userId);
+
+      if (userIndex === -1) {
+        // User not in list - they need to join first
+        throw new Error('User not in active users list');
+      }
+
+      // Sadece timestamp'i güncelle - minimal write operation
+      const updatedActiveUsers = [...activeUsers];
+      updatedActiveUsers[userIndex] = {
+        ...updatedActiveUsers[userIndex],
+        lastSeen: Timestamp.now()
+      };
+
+      transaction.update(boardRef, {
+        activeUsers: updatedActiveUsers
+      });
     });
-    
+
     return true;
   } catch (error) {
     console.error('Error updating heartbeat:', error);
@@ -333,22 +373,29 @@ export async function updateUserHeartbeat(boardId, userId) {
 
 /**
  * Leave board - Remove user from active users
+ * ✅ FIX #3: Transaction ile race condition önlendi
  */
 export async function leaveBoard(boardId, userId) {
   try {
     const boardRef = doc(db, BOARDS_COLLECTION, boardId);
-    const board = await getBoard(boardId);
-    
-    if (!board) return false;
 
-    const updatedActiveUsers = (board.activeUsers || []).filter(
-      user => user.userId !== userId
-    );
-    
-    await updateDoc(boardRef, {
-      activeUsers: updatedActiveUsers
+    // ✅ Transaction ile atomic operation
+    await runTransaction(db, async (transaction) => {
+      const boardDoc = await transaction.get(boardRef);
+
+      if (!boardDoc.exists()) {
+        throw new Error('Board not found');
+      }
+
+      const updatedActiveUsers = (boardDoc.data().activeUsers || []).filter(
+        user => user.userId !== userId
+      );
+
+      transaction.update(boardRef, {
+        activeUsers: updatedActiveUsers
+      });
     });
-    
+
     return true;
   } catch (error) {
     console.error('Error leaving board:', error);

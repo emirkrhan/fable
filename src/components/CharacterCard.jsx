@@ -43,12 +43,15 @@ function CharacterCard({ id, data, selected }) {
 
   useEffect(() => { updateNodeInternals(id); }, [id, updateNodeInternals]);
 
+  // Sadece popover kapalıyken external update'leri al
   useEffect(() => {
-    setTempProfileUrl(data.profileUrl || '');
-    setTempFirstName(data.firstName || '');
-    setTempLastName(data.lastName || '');
-    setTempSynopsis(data.synopsis || '');
-  }, [data.profileUrl, data.firstName, data.lastName, data.synopsis]);
+    if (!isPopoverOpen) {
+      setTempProfileUrl(data.profileUrl || '');
+      setTempFirstName(data.firstName || '');
+      setTempLastName(data.lastName || '');
+      setTempSynopsis(data.synopsis || '');
+    }
+  }, [data.profileUrl, data.firstName, data.lastName, data.synopsis, isPopoverOpen]);
 
   const handleSave = useCallback(() => {
     if (isReadOnly) return;
@@ -65,30 +68,88 @@ function CharacterCard({ id, data, selected }) {
     setIsEditing(false);
   }, [id, tempProfileUrl, tempFirstName, tempLastName, tempSynopsis, setNodes, isReadOnly]);
 
+  // Popover açarken z-index'i ayarla
+  const openPopover = useCallback(() => {
+    if (isReadOnly) return;
+    setNodes((nds) => nds.map((node) => 
+      node.id === id ? { ...node, zIndex: 1000 } : node
+    ));
+    setIsPopoverOpen(true);
+    setIsEditing(true);
+    setTimeout(() => firstNameRef.current?.focus(), 0);
+  }, [id, setNodes, isReadOnly]);
+
+  // Popover kapatırken z-index'i sıfırla ve değişiklikleri kaydet
+  const closePopover = useCallback(() => {
+    if (isReadOnly) {
+      setIsPopoverOpen(false);
+      setIsEditing(false);
+      setNodes((nds) => nds.map((node) =>
+        node.id === id ? { ...node, zIndex: undefined } : node
+      ));
+      return;
+    }
+
+    // Önce popover state'lerini kapat
+    setIsPopoverOpen(false);
+    setIsEditing(false);
+
+    // Değişiklikleri kaydet - React batch update sonrası
+    setTimeout(() => {
+      setNodes((nds) => nds.map((node) => {
+        if (node.id !== id) return node;
+
+        return {
+          ...node,
+          data: {
+            ...node.data,
+            profileUrl: tempProfileUrl,
+            firstName: tempFirstName,
+            lastName: tempLastName,
+            synopsis: tempSynopsis,
+          },
+          zIndex: undefined
+        };
+      }));
+    }, 0);
+  }, [id, setNodes, isReadOnly, tempProfileUrl, tempFirstName, tempLastName, tempSynopsis]);
+
+  // Dropdown açarken z-index'i ayarla
+  const toggleDropdown = useCallback(() => {
+    const willOpen = !isDropdownOpen;
+    setNodes((nds) => nds.map((node) => 
+      node.id === id ? { ...node, zIndex: willOpen ? 1000 : undefined } : node
+    ));
+    setIsDropdownOpen(willOpen);
+  }, [id, setNodes, isDropdownOpen]);
+
+  // Dropdown kapatırken z-index'i sıfırla
+  const closeDropdown = useCallback(() => {
+    setNodes((nds) => nds.map((node) => 
+      node.id === id ? { ...node, zIndex: undefined } : node
+    ));
+    setIsDropdownOpen(false);
+  }, [id, setNodes]);
+
   useEffect(() => {
     function handleClickOutside(event) {
       if (popoverRef.current && !popoverRef.current.contains(event.target)) {
-        if (isEditing) handleSave();
-        setIsPopoverOpen(false);
-        setIsEditing(false);
+        closePopover();
       }
       if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
-        setIsDropdownOpen(false);
+        closeDropdown();
       }
     }
-    if (isPopoverOpen || isDropdownOpen) {
-      document.addEventListener('click', handleClickOutside);
-    }
-    return () => document.removeEventListener('click', handleClickOutside);
-  }, [isPopoverOpen, isDropdownOpen, isEditing, handleSave]);
 
-  const handleCancel = useCallback(() => {
-    setTempProfileUrl(profileUrl);
-    setTempFirstName(firstName);
-    setTempLastName(lastName);
-    setTempSynopsis(synopsis);
-    setIsEditing(false);
-  }, [profileUrl, firstName, lastName, synopsis]);
+    if (isPopoverOpen || isDropdownOpen) {
+      document.addEventListener('mousedown', handleClickOutside, true);
+    }
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside, true);
+    };
+  }, [isPopoverOpen, isDropdownOpen, closePopover, closeDropdown]);
+
 
   const handleDelete = useCallback(() => {
     setNodes((nds) => nds.filter((node) => node.id !== id));
@@ -127,7 +188,7 @@ function CharacterCard({ id, data, selected }) {
           selected && "border-primary/40",
           !isReadOnly && "cursor-pointer"
         )}
-        onClick={() => { if (!isReadOnly) { setIsPopoverOpen(true); setIsEditing(true); setTimeout(() => firstNameRef.current?.focus(), 0); } }}
+        onClick={() => { if (!isReadOnly) { openPopover(); } }}
       >
         {/* Four handles */}
         <Handle type="source" position={Position.Top} id="top" style={{...handleStyle, top: -6}} isConnectable={true} />
@@ -159,22 +220,22 @@ function CharacterCard({ id, data, selected }) {
                 <button
                   className="px-1 py-1.5 rounded-md hover:bg-foreground/10 transition-colors"
                   title="Actions"
-                  onClick={(e) => { e.stopPropagation(); setIsDropdownOpen(!isDropdownOpen); }}
+                  onClick={(e) => { e.stopPropagation(); toggleDropdown(); }}
                 >
                   <MoreVertical className="w-4 h-4" />
                 </button>
                 {isDropdownOpen && (
-                  <div className="absolute right-0 top-full mt-1 w-40 bg-popover border border-border rounded-md shadow-lg z-50 animate-in fade-in-0 zoom-in-95">
-                    <div className="py-1">
+                  <div className="absolute right-0 top-full mt-1 w-40 bg-popover border border-border rounded-md shadow-lg z-[9999] animate-in fade-in-0 zoom-in-95">
+                    <div className="py-1 px-1">
                       <button
-                        className="w-full px-2 py-1.5 mx-1 text-sm text-left hover:bg-accent hover:text-accent-foreground transition-colors rounded-sm"
-                        onClick={(e) => { e.stopPropagation(); duplicateCard(); setIsDropdownOpen(false); }}
+                        className="w-full px-2 py-1.5 text-sm text-left hover:bg-accent hover:text-accent-foreground transition-colors rounded-sm"
+                        onClick={(e) => { e.stopPropagation(); duplicateCard(); closeDropdown(); }}
                       >
                         Duplicate
                       </button>
                       <button
-                        className="w-full px-2 py-1.5 mx-1 text-sm text-left hover:bg-destructive/10 hover:text-destructive flex items-center gap-2 transition-colors rounded-sm"
-                        onClick={(e) => { e.stopPropagation(); setConfirmOpen(true); setIsDropdownOpen(false); }}
+                        className="w-full px-2 py-1.5 text-sm text-left hover:bg-destructive/10 hover:text-destructive flex items-center gap-2 transition-colors rounded-sm"
+                        onClick={(e) => { e.stopPropagation(); setConfirmOpen(true); closeDropdown(); }}
                       >
                         <Trash2 className="w-4 h-4" />
                         Delete
@@ -207,7 +268,7 @@ function CharacterCard({ id, data, selected }) {
       {isPopoverOpen && (
         <div
           ref={popoverRef}
-          className="absolute left-0 top-full mt-2 w-[360px] bg-popover border border-border rounded-lg shadow-lg z-50 animate-in fade-in-0 zoom-in-95"
+          className="absolute left-0 top-full mt-2 w-[360px] bg-popover border border-border rounded-lg shadow-lg z-[9999] animate-in fade-in-0 zoom-in-95"
           onClick={(e) => e.stopPropagation()}
         >
           <div className="p-4 space-y-3">

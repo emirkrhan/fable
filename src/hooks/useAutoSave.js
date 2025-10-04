@@ -31,9 +31,32 @@ export function useAutoSave(saveFunction, data, options = {}) {
   const isSavingRef = useRef(false);
   const saveQueuedRef = useRef(false);
 
-  // Serialize data for comparison
+  // ✅ FIX #8: Smart serialization - sadece önemli field'ları serialize et
   const serializeData = useCallback((data) => {
     try {
+      // Eğer data bir string ise (workspaceDataTrigger gibi), direkt kullan
+      if (typeof data === 'string' || typeof data === 'number') {
+        return String(data);
+      }
+
+      // Object ise akıllı serialize yap
+      if (data && typeof data === 'object') {
+        // Sadece node content ve edge data'sını serialize et - position değişimini ignore et
+        return JSON.stringify({
+          nodes: data.nodes?.map(n => ({
+            id: n.id,
+            type: n.type,
+            data: n.data // ✅ Sadece content, position yok
+          })),
+          edges: data.edges?.map(e => ({
+            id: e.id,
+            source: e.source,
+            target: e.target,
+            data: e.data
+          }))
+        });
+      }
+
       return JSON.stringify(data);
     } catch {
       return null;

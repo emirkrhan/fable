@@ -25,7 +25,7 @@ function TitleCard({ id, data, selected }) {
 
   const inputRef = useRef(null);
   const dropdownRef = useRef(null);
-  const { setNodes, setEdges } = useReactFlow();
+  const { setNodes, setEdges, getNodes } = useReactFlow();
   const updateNodeInternals = useUpdateNodeInternals();
 
   const isReadOnly = data.isReadOnly || false;
@@ -75,6 +75,33 @@ function TitleCard({ id, data, selected }) {
     setEdges((eds) => eds.filter((edge) => edge.source !== id && edge.target !== id));
     toast('Title card deleted.', { icon: <Trash2 className="w-4 h-4" /> });
   }, [id, setNodes, setEdges]);
+
+  const duplicateCard = useCallback(() => {
+    try {
+      const nodes = getNodes?.() || [];
+      const original = nodes.find((n) => n.id === id);
+      const maxId = nodes
+        .map((n) => parseInt(n.id, 10))
+        .filter((n) => !Number.isNaN(n))
+        .reduce((acc, n) => Math.max(acc, n), 0);
+      const newId = (maxId || 0) + 1;
+      const newPosition = original?.position
+        ? { x: original.position.x + 40, y: original.position.y + 40 }
+        : { x: 120, y: 120 };
+      const newNode = {
+        id: String(newId),
+        type: 'titleCard',
+        position: newPosition,
+        data: {
+          text: data.text || ''
+        },
+      };
+      setNodes((nds) => [...nds, newNode]);
+      toast('Title card duplicated.');
+    } catch (e) {
+      console.warn('Duplicate failed', e);
+    }
+  }, [getNodes, id, setNodes, data]);
 
   const handleCardClick = () => {
     if (isReadOnly || isEditing) return;
@@ -156,7 +183,10 @@ function TitleCard({ id, data, selected }) {
           )}
 
           {!isReadOnly && (
-            <div className="flex items-center gap-1 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" ref={dropdownRef}>
+            <div className={cn(
+              "flex items-center gap-1 flex-shrink-0 transition-opacity",
+              isDropdownOpen ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+            )} ref={dropdownRef}>
             <button
               onClick={(e) => { 
                 e.stopPropagation(); 
@@ -169,13 +199,23 @@ function TitleCard({ id, data, selected }) {
             </button>
             {isDropdownOpen && (
               <div className="absolute right-0 top-full mt-1 w-32 bg-popover border border-border rounded-md shadow-lg z-50 animate-in fade-in-0 zoom-in-95">
-                <div className="py-1">
+                <div className="py-1 px-1">
                   <button
-                    className="w-full px-2 py-1.5 mx-1 text-xs text-left hover:bg-destructive/10 hover:text-destructive flex items-center gap-2 transition-colors rounded-sm"
-                    onClick={(e) => { 
-                      e.stopPropagation(); 
-                      setConfirmOpen(true); 
-                      setIsDropdownOpen(false); 
+                    className="w-full px-2 py-1.5 text-xs text-left hover:bg-accent hover:text-accent-foreground flex items-center gap-2 transition-colors rounded-sm"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      duplicateCard();
+                      setIsDropdownOpen(false);
+                    }}
+                  >
+                    Duplicate
+                  </button>
+                  <button
+                    className="w-full px-2 py-1.5 text-xs text-left hover:bg-destructive/10 hover:text-destructive flex items-center gap-2 transition-colors rounded-sm"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setConfirmOpen(true);
+                      setIsDropdownOpen(false);
                     }}
                   >
                     <Trash2 className="w-3 h-3" />

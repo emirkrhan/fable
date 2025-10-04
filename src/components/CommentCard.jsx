@@ -31,9 +31,12 @@ function CommentCard({ id, data, selected }) {
   const authorName = data.authorName || 'Anonymous';
   const createdAt = data.createdAt;
   const authorId = data.authorId;
+  const isBoardOwner = data.isBoardOwner || false;
 
-  // Only author can delete/edit their own comment
+  // Author can edit/delete their own comment
+  // Board owner can delete any comment but cannot edit others' comments
   const canEdit = user && authorId === user.uid;
+  const canDelete = canEdit || isBoardOwner;
 
   const handleTextSubmit = useCallback(() => {
     setIsEditing(false);
@@ -187,7 +190,7 @@ function CommentCard({ id, data, selected }) {
                 </div>
               </div>
               <div className="flex items-center gap-1">
-                {canEdit && (
+                {canDelete && (
                   <button
                     onClick={() => setConfirmOpen(true)}
                     className="p-1 hover:bg-gray-200 rounded transition-colors"

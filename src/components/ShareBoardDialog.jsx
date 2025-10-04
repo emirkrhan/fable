@@ -28,17 +28,16 @@ export default function ShareBoardDialog({ open, onOpenChange, boardId, sharedWi
       return;
     }
 
-    try {
-      setSharing(true);
-      await shareBoardWithUser(boardId, email.trim(), user.uid);
+    setSharing(true);
+    const result = await shareBoardWithUser(boardId, email.trim(), user.uid);
+    setSharing(false);
+
+    if (result.success) {
       toast.success('Board shared successfully!', { icon: <Check className="w-4 h-4" /> });
       setEmail('');
       if (onUpdate) onUpdate();
-    } catch (error) {
-      console.error('Error sharing board:', error);
-      toast.error(error.message || 'Failed to share board');
-    } finally {
-      setSharing(false);
+    } else {
+      toast.error(result.error || 'Failed to share board');
     }
   };
 
@@ -48,7 +47,6 @@ export default function ShareBoardDialog({ open, onOpenChange, boardId, sharedWi
       toast.success('User removed from board', { icon: <Check className="w-4 h-4" /> });
       if (onUpdate) onUpdate();
     } catch (error) {
-      console.error('Error unsharing board:', error);
       toast.error('Failed to remove user');
     }
   };

@@ -518,9 +518,9 @@ function StoryCard({ id, data, selected, onAddComment }) {
 
               {isDropdownOpen && (
                 <div className="absolute right-0 top-full mt-1 w-40 bg-popover border border-border rounded-md shadow-lg z-50 animate-in fade-in-0 zoom-in-95 data-[side=bottom]:slide-in-from-top-2">
-                  <div className="py-1">
+                  <div className="py-1 px-1">
                     <button
-                      className="w-full px-2 py-1.5 mx-1 text-sm text-left hover:bg-accent hover:text-accent-foreground flex items-center justify-between transition-colors rounded-sm"
+                      className="w-full px-2 py-1.5 text-sm text-left hover:bg-accent hover:text-accent-foreground flex items-center justify-between transition-colors rounded-sm"
                       onClick={() => {
                         focusTitle();
                         setIsDropdownOpen(false);
@@ -530,7 +530,7 @@ function StoryCard({ id, data, selected, onAddComment }) {
                       <span className="text-[10px] text-muted-foreground/70">Alt+E</span>
                     </button>
                     <button
-                      className="w-full px-2 py-1.5 mx-1 text-sm text-left hover:bg-accent hover:text-accent-foreground flex items-center justify-between transition-colors rounded-sm"
+                      className="w-full px-2 py-1.5 text-sm text-left hover:bg-accent hover:text-accent-foreground flex items-center justify-between transition-colors rounded-sm"
                       onClick={() => {
                         openTagDialog();
                         setIsDropdownOpen(false);
@@ -541,7 +541,7 @@ function StoryCard({ id, data, selected, onAddComment }) {
                     </button>
                     {onAddComment && (
                       <button
-                        className="w-full px-2 py-1.5 mx-1 text-sm text-left hover:bg-accent hover:text-accent-foreground flex items-center gap-2 transition-colors rounded-sm"
+                        className="w-full px-2 py-1.5 text-sm text-left hover:bg-accent hover:text-accent-foreground flex items-center gap-2 transition-colors rounded-sm"
                         onClick={() => {
                           onAddComment(id);
                           setIsDropdownOpen(false);
@@ -553,9 +553,9 @@ function StoryCard({ id, data, selected, onAddComment }) {
                     )}
                   </div>
 
-                  <div className="border-t border-border py-1">
+                  <div className="border-t border-border py-1 px-1">
                     <button
-                      className="w-full px-2 py-1.5 mx-1 text-sm text-left hover:bg-accent hover:text-accent-foreground flex items-center justify-between transition-colors rounded-sm"
+                      className="w-full px-2 py-1.5 text-sm text-left hover:bg-accent hover:text-accent-foreground flex items-center justify-between transition-colors rounded-sm"
                       onClick={() => {
                         duplicateCard();
                         setIsDropdownOpen(false);
@@ -565,7 +565,7 @@ function StoryCard({ id, data, selected, onAddComment }) {
                       <span className="text-[10px] text-muted-foreground/70">Alt+D</span>
                     </button>
                     <button
-                      className="w-full px-2 py-1.5 mx-1 text-sm text-left hover:bg-destructive/10 hover:text-destructive flex items-center gap-2 transition-colors rounded-sm"
+                      className="w-full px-2 py-1.5 text-sm text-left hover:bg-destructive/10 hover:text-destructive flex items-center gap-2 transition-colors rounded-sm"
                       onClick={() => {
                         setConfirmOpen(true);
                         setIsDropdownOpen(false);

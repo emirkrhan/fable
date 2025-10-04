@@ -96,20 +96,20 @@ const STORAGE_KEY = 'story-planner:flow:v1';
 function areNodesEqual(nodes1, nodes2) {
   if (!nodes1 || !nodes2) return false;
   if (nodes1.length !== nodes2.length) return false;
-  
+
   try {
     const str1 = JSON.stringify(nodes1.map(({ id, type, position, data }) => {
       if (!data) return { id, type, position, data: {} };
-      const { onAddComment, isReadOnly, ...cleanData } = data;
+      const { onAddComment, isReadOnly, isBoardOwner, ...cleanData } = data;
       return { id, type, position, data: cleanData };
     }));
-    
+
     const str2 = JSON.stringify(nodes2.map(({ id, type, position, data }) => {
       if (!data) return { id, type, position, data: {} };
-      const { onAddComment, isReadOnly, ...cleanData } = data;
+      const { onAddComment, isReadOnly, isBoardOwner, ...cleanData } = data;
       return { id, type, position, data: cleanData };
     }));
-    
+
     return str1 === str2;
   } catch {
     return false;
@@ -153,8 +153,21 @@ export default function ReactFlowPlanner({ boardId }) {
   const previousNodesRef = useRef(null); // 🔒 Önceki nodes - deep comparison için
   const previousEdgesRef = useRef(null); // 🔒 Önceki edges - deep comparison için
 
+  // ✅ FIX #6: User bilgilerini ref'te tut - re-render optimizasyonu
+  const userRef = useRef({ uid: null, displayName: null, email: null, photoURL: null });
+
   // Track previous user to detect user changes
   const [previousUserId, setPreviousUserId] = useState(null);
+
+  // ✅ FIX #6: User değiştiğinde ref'i güncelle
+  useEffect(() => {
+    userRef.current = {
+      uid: user?.uid || null,
+      displayName: user?.displayName || null,
+      email: user?.email || null,
+      photoURL: user?.photoURL || null
+    };
+  }, [user]);
 
   // Global click handler to close dropdowns
   useEffect(() => {
@@ -196,6 +209,14 @@ export default function ReactFlowPlanner({ boardId }) {
     const unsubscribe = onSnapshot(
       boardRef,
       (snapshot) => {
+        // ✅ FIX #4: Her snapshot'ta auth kontrolü - kullanıcı logout olsa bile güvenli
+        if (!user?.uid) {
+          console.warn('User logged out during board sync, stopping listener');
+          unsubscribe();
+          router.push('/login');
+          return;
+        }
+
         // Board yoksa
         if (!snapshot.exists()) {
           toast.error('Board not found');
@@ -259,7 +280,7 @@ export default function ReactFlowPlanner({ boardId }) {
           const initialData = JSON.stringify({
             nodes: boardNodes.map(({ id, type, position, data }) => {
               if (!data) return { id, type, position, data: {} };
-              const { onAddComment, isReadOnly, ...cleanData } = data;
+              const { onAddComment, isReadOnly, isBoardOwner, ...cleanData } = data;
               return { id, type, position, data: cleanData };
             }),
             edges: boardEdges.map(({ id, source, target, sourceHandle, targetHandle, type, data, animated, style }) => ({
@@ -320,6 +341,7 @@ export default function ReactFlowPlanner({ boardId }) {
   }, [boardId, user?.uid, isLoading]); // displayName ve photoURL kaldırıldı - gereksiz re-run önlendi
 
   // 👁️ TAB VISIBILITY: Kullanıcı tab'ı gizlediğinde/gösterdiğinde
+  // ✅ FIX #7: Handler fonksiyonu useEffect içinde tanımlanıyor - memory leak giderildi
   useEffect(() => {
     if (!boardId || !user?.uid || isLoading) return;
 
@@ -334,11 +356,11 @@ export default function ReactFlowPlanner({ boardId }) {
     };
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
-    
+
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [boardId, user?.uid, isLoading]); // ⚠️ FIX: Gereksiz dependencies kaldırıldı
+  }, [boardId, user?.uid, user?.displayName, user?.email, user?.photoURL, isLoading]);
 
   // 💓 HEARTBEAT: Her 30 saniyede bir "still alive" sinyali gönder
   // Bu sayede browser crash/kapatma durumlarında 60 saniye içinde offline olur
@@ -377,10 +399,11 @@ export default function ReactFlowPlanner({ boardId }) {
   );
 
   // Add comment card next to a specific node
-  // ⚠️ FIX: nodes dependency'sini kaldırdık - setNodes içinde callback kullanıyoruz
-  // ⚠️ FIX: nodeId yerine nodeIdRef kullanıyoruz - daha stable callback
+  // ✅ FIX #6: userRef kullanarak stable callback - gereksiz re-render önlendi
   const addCommentToNode = useCallback((targetNodeId) => {
-    if (!user?.uid) {
+    const currentUser = userRef.current;
+
+    if (!currentUser.uid) {
       toast("Please sign in to add comments.");
       return;
     }
@@ -396,14 +419,14 @@ export default function ReactFlowPlanner({ boardId }) {
 
     const commentData = {
       text: '',
-      authorId: user.uid,
-      authorName: user.displayName || user.email || 'Anonymous',
-      authorEmail: user.email || '',
+      authorId: currentUser.uid,
+      authorName: currentUser.displayName || currentUser.email || 'Anonymous',
+      authorEmail: currentUser.email || '',
       createdAt: new Date()
     };
 
     const newNode = {
-        id: nodeIdRef.current.toString(), // ⚠️ FIX: ref kullan
+        id: nodeIdRef.current.toString(),
       type: 'commentCard',
       position: newPosition,
       data: commentData,
@@ -416,12 +439,14 @@ export default function ReactFlowPlanner({ boardId }) {
 
       return [...currentNodes, newNode];
     });
-    
+
     toast('Comment created.', { icon: <Check className="w-4 h-4" /> });
-  }, [user?.uid, user?.displayName, user?.email, setNodes]); // nodeId kaldırıldı!
+  }, [setNodes]); // ✅ Sadece setNodes dependency
 
   const addNode = useCallback((cardTypeOrEvent, position) => {
-    if (!user?.uid) {
+    const currentUser = userRef.current; // ✅ FIX #6: userRef kullan
+
+    if (!currentUser.uid) {
       toast("Please sign in to add cards.");
       window.location.replace('/login');
       return;
@@ -487,9 +512,9 @@ export default function ReactFlowPlanner({ boardId }) {
       case 'commentCard':
         nodeData = {
           text: '',
-          authorId: user.uid,
-          authorName: user.displayName || user.email || 'Anonymous',
-          authorEmail: user.email || '',
+          authorId: currentUser.uid,
+          authorName: currentUser.displayName || currentUser.email || 'Anonymous',
+          authorEmail: currentUser.email || '',
           createdAt: new Date()
         };
         break;
@@ -500,7 +525,7 @@ export default function ReactFlowPlanner({ boardId }) {
     }
 
     const newNode = {
-      id: nodeIdRef.current.toString(), // ⚠️ FIX: ref kullan
+      id: nodeIdRef.current.toString(),
       type: cardType,
       position: newPosition,
       data: nodeData,
@@ -513,14 +538,14 @@ export default function ReactFlowPlanner({ boardId }) {
       console.log('New nodes:', newNodes.length);
       return newNodes;
     });
-    
+
     // Increment ref for next node
     nodeIdRef.current += 1;
     setNodeId(nodeIdRef.current);
 
     const cardTypeName = cardType === 'commentCard' ? 'Comment' : cardType === 'linkCard' ? 'Link card' : 'Card';
     toast(`${cardTypeName} created.`, { icon: <Check className="w-4 h-4" /> });
-  }, [setNodes, user, boardPermission]); // ⚠️ FIX: nodeId dependency kaldırıldı
+  }, [setNodes, boardPermission]); // ✅ FIX #6: user dependency kaldırıldı
 
   const updateNodeData = useCallback((id, newData) => {
     setNodes((nds) =>
@@ -543,7 +568,7 @@ export default function ReactFlowPlanner({ boardId }) {
     try {
       const workspaceData = {
         nodes: nodes.map(({ id, type, position, data }) => {
-          const { onAddComment, isReadOnly, ...cleanData } = data || {};
+          const { onAddComment, isReadOnly, isBoardOwner, ...cleanData } = data || {};
           return { id, type, position, data: cleanData };
         }),
         edges: edges.map(({ id, source, target, sourceHandle, targetHandle, type, data, animated, style }) => ({ id, source, target, sourceHandle, targetHandle, type, data, animated, style })),
@@ -582,10 +607,10 @@ export default function ReactFlowPlanner({ boardId }) {
     if (!boardId) return;
 
     try {
-      // Clean and filter node data - remove functions like onAddComment and isReadOnly
+      // Clean and filter node data - remove functions like onAddComment, isReadOnly, and isBoardOwner
       const cleanNodes = nodes.map(({ id, type, position, data }) => {
         // Remove functions and temporary props from data
-        const { onAddComment, isReadOnly, ...cleanData } = data || {};
+        const { onAddComment, isReadOnly, isBoardOwner, ...cleanData } = data || {};
         return {
           id: id || '',
           type: type || 'storyCard',
@@ -639,7 +664,7 @@ export default function ReactFlowPlanner({ boardId }) {
     // Clean nodes - remove functions and temporary props
     const cleanNodes = nodes.map(({ id, type, position, data }) => {
       if (!data) return { id, type, position, data: {} };
-      const { onAddComment, isReadOnly, ...cleanData } = data;
+      const { onAddComment, isReadOnly, isBoardOwner, ...cleanData } = data;
       return { id, type, position, data: cleanData };
     });
 
@@ -676,7 +701,7 @@ export default function ReactFlowPlanner({ boardId }) {
     silentSave,
     workspaceDataTrigger, // ✅ Trigger kullan - her değişiklikte artıyor
     {
-      debounceMs: 2000, // 4000'den 2000'e düşürüldü - daha responsive
+      debounceMs: 3000, // 3 saniye
       enabled: !!user?.uid && !isLoading && !!boardPermission && workspaceDataTrigger > 0, // ✅ Trigger > 0 olunca aktif
     }
   );
@@ -798,12 +823,14 @@ export default function ReactFlowPlanner({ boardId }) {
   // ⚠️ FIX: Bu sadece render için kullanılır, workspaceData için değil
   const enhancedNodes = useMemo(() => {
     const isReadOnly = boardPermission === 'comment-only';
+    const isBoardOwner = boardPermission === 'owner';
     return nodes.map(node => {
       const baseNode = {
         ...node,
         data: {
           ...node.data,
-          isReadOnly: isReadOnly
+          isReadOnly: isReadOnly,
+          isBoardOwner: isBoardOwner
         },
         dragHandle: '.drag-handle',
         // In comment-only mode: only commentCards are draggable

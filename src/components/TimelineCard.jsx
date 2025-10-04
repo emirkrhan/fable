@@ -32,10 +32,44 @@ function TimelineCard({ id, data, selected }) {
 
   useEffect(() => { updateNodeInternals(id); }, [id, updateNodeInternals]);
 
+  // Popover açarken z-index'i ayarla
+  const openPopover = useCallback(() => {
+    if (isReadOnly) return;
+    setNodes((nds) => nds.map((node) => 
+      node.id === id ? { ...node, zIndex: 1000 } : node
+    ));
+    setIsPopoverOpen(true);
+  }, [id, setNodes, isReadOnly]);
+
+  // Popover kapatırken z-index'i sıfırla
+  const closePopover = useCallback(() => {
+    setNodes((nds) => nds.map((node) => 
+      node.id === id ? { ...node, zIndex: undefined } : node
+    ));
+    setIsPopoverOpen(false);
+  }, [id, setNodes]);
+
+  // Dropdown açarken z-index'i ayarla
+  const toggleDropdown = useCallback(() => {
+    const willOpen = !isDropdownOpen;
+    setNodes((nds) => nds.map((node) => 
+      node.id === id ? { ...node, zIndex: willOpen ? 1000 : undefined } : node
+    ));
+    setIsDropdownOpen(willOpen);
+  }, [id, setNodes, isDropdownOpen]);
+
+  // Dropdown kapatırken z-index'i sıfırla
+  const closeDropdown = useCallback(() => {
+    setNodes((nds) => nds.map((node) => 
+      node.id === id ? { ...node, zIndex: undefined } : node
+    ));
+    setIsDropdownOpen(false);
+  }, [id, setNodes]);
+
   const handleDateSelect = useCallback((date) => {
     if (isReadOnly) return;
     // Immediately save and close when date is selected
-    setNodes((nds) => nds.map((node) => node.id === id ? { ...node, data: { ...node.data, date: date ? date.toISOString() : '' } } : node));
+    setNodes((nds) => nds.map((node) => node.id === id ? { ...node, data: { ...node.data, date: date ? date.toISOString() : '' }, zIndex: undefined } : node));
     setIsPopoverOpen(false);
   }, [id, setNodes, isReadOnly]);
 
@@ -43,15 +77,15 @@ function TimelineCard({ id, data, selected }) {
     function handleClickOutside(event) {
       if (popoverRef.current && !popoverRef.current.contains(event.target)) {
         // Don't save on outside click, just close
-        setIsPopoverOpen(false);
+        closePopover();
       }
       if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
-        setIsDropdownOpen(false);
+        closeDropdown();
       }
     }
     if (isPopoverOpen || isDropdownOpen) document.addEventListener('click', handleClickOutside);
     return () => document.removeEventListener('click', handleClickOutside);
-  }, [isPopoverOpen, isDropdownOpen]);
+  }, [isPopoverOpen, isDropdownOpen, closePopover, closeDropdown]);
 
   const handleDelete = useCallback(() => {
     setNodes((nds) => nds.filter((node) => node.id !== id));
@@ -71,7 +105,7 @@ function TimelineCard({ id, data, selected }) {
           selected && "border-purple-400",
           !isReadOnly && "cursor-pointer"
         )}
-        onClick={() => !isReadOnly && setIsPopoverOpen(true)}
+        onClick={() => !isReadOnly && openPopover()}
       >
         {/* Only side handles */}
         <Handle
@@ -96,20 +130,23 @@ function TimelineCard({ id, data, selected }) {
           </div>
           <div className="flex-1 min-w-0 text-sm text-purple-900 dark:text-purple-100 truncate">{display}</div>
           {!isReadOnly && (
-            <div className="flex items-center gap-1 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" ref={dropdownRef}>
+            <div className={cn(
+              "flex items-center gap-1 flex-shrink-0 transition-opacity",
+              isDropdownOpen ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+            )} ref={dropdownRef}>
             <button
-              onClick={(e) => { e.stopPropagation(); setIsDropdownOpen(!isDropdownOpen); }}
+              onClick={(e) => { e.stopPropagation(); toggleDropdown(); }}
               className="p-1 hover:bg-purple-200 dark:hover:bg-purple-800 rounded transition-colors"
               title="More options"
             >
               <MoreVertical className="w-3 h-3 text-white" />
             </button>
             {isDropdownOpen && (
-              <div className="absolute right-0 top-full mt-1 w-32 bg-popover border border-border rounded-md shadow-lg z-50 animate-in fade-in-0 zoom-in-95">
-                <div className="py-1">
+              <div className="absolute right-0 top-full mt-1 w-32 bg-popover border border-border rounded-md shadow-lg z-[9999] animate-in fade-in-0 zoom-in-95">
+                <div className="py-1 px-1">
                   <button
-                    className="w-full px-2 py-1.5 mx-1 text-xs text-left hover:bg-destructive/10 hover:text-destructive flex items-center gap-2 transition-colors rounded-sm"
-                    onClick={(e) => { e.stopPropagation(); setConfirmOpen(true); setIsDropdownOpen(false); }}
+                    className="w-full px-2 py-1.5 text-xs text-left hover:bg-destructive/10 hover:text-destructive flex items-center gap-2 transition-colors rounded-sm"
+                    onClick={(e) => { e.stopPropagation(); setConfirmOpen(true); closeDropdown(); }}
                   >
                     <Trash2 className="w-3 h-3" />
                     Delete
@@ -138,7 +175,7 @@ function TimelineCard({ id, data, selected }) {
       {isPopoverOpen && (
         <div
           ref={popoverRef}
-          className="absolute left-0 top-full mt-2 w-[320px] bg-popover border border-border rounded-lg shadow-lg z-50 animate-in fade-in-0 zoom-in-95"
+          className="absolute left-0 top-full mt-2 w-[320px] bg-popover border border-border rounded-lg shadow-lg z-[9999] animate-in fade-in-0 zoom-in-95"
           onClick={(e) => e.stopPropagation()}
         >
           <div className="p-3">
