@@ -19,6 +19,8 @@ import TimelineCard from './TimelineCard';
 import TitleCard from './TitleCard';
 import CommentCard from './CommentCard';
 import ImageCard from './ImageCard';
+import LocationCard from './LocationCard';
+import NumberCard from './NumberCard';
 import ListCard from './ListCard';
 import LabeledEdge from './LabeledEdge';
 import { Plus, Check, Loader2, Upload, Loader } from 'lucide-react';
@@ -42,6 +44,8 @@ const nodeTypes = {
   commentCard: CommentCard,
   imageCard: ImageCard,
   listCard: ListCard,
+  locationCard: LocationCard,
+  numberCard: NumberCard,
 };
 
 // Wrapper for LabeledEdge to pass permission
@@ -105,6 +109,7 @@ export default function ReactFlowPlanner({ boardId }) {
   const [boardPermission, setBoardPermission] = useState(null);
   const [shareDialogOpen, setShareDialogOpen] = useState(false);
   const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 });
+  // Remove online/offline gating: keep behavior simple
 
   // Collaboration disabled: no realtime updates
 
@@ -352,6 +357,16 @@ export default function ReactFlowPlanner({ boardId }) {
           url: ''
         };
         break;
+      case 'numberCard':
+        nodeData = {
+          value: ''
+        };
+        break;
+      case 'locationCard':
+        nodeData = {
+          location: ''
+        };
+        break;
       case 'listCard':
         nodeData = {
           items: [
@@ -477,8 +492,33 @@ export default function ReactFlowPlanner({ boardId }) {
         ...(style && { style })
       }));
 
+      // Abortable save with size guard
+      const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+
+      // Size guard: if payload is too big, fail fast with clearer error
+      const payloadSize = new Blob([JSON.stringify({ nodes: cleanNodes, edges: cleanEdges })]).size;
+      const maxPayloadBytes = 4 * 1024 * 1024; // 4MB soft limit
+      if (payloadSize > maxPayloadBytes) {
+        throw new Error('Workspace too large to save (exceeds 4MB). Consider splitting.');
+      }
+
+      // Hard timeout for manual save as well
+      const withTimeout = (promise, ms) =>
+        new Promise((resolve, reject) => {
+          const id = setTimeout(() => {
+            if (controller) controller.abort();
+            reject(new Error('Save timeout'));
+          }, ms);
+          promise
+            .then((res) => { clearTimeout(id); resolve(res); })
+            .catch((err) => { clearTimeout(id); reject(err); });
+        });
+
       // Save to board
-      const saved = await saveBoardContent(boardId, cleanNodes, cleanEdges);
+      const saved = await withTimeout(
+        saveBoardContent(boardId, cleanNodes, cleanEdges, { signal: controller?.signal }),
+        15000
+      );
 
       // Collaboration disabled: no broadcast
 
@@ -491,7 +531,10 @@ export default function ReactFlowPlanner({ boardId }) {
     } catch (e) {
       console.error('Failed to save board', e);
       if (!silent) {
-        toast("Failed to save board", { variant: "destructive" });
+        const message = e?.message?.includes('timeout')
+          ? 'Save timed out. Check your connection.'
+          : e?.message || 'Failed to save board';
+        toast(message, { variant: "destructive" });
       }
       throw e; // Re-throw for auto-save error handling
     }

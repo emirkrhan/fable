@@ -249,6 +249,22 @@ function TopNav({
                   <button
                     className="w-full px-2 py-1 text-left hover:bg-accent hover:text-accent-foreground flex items-center gap-2 transition-colors rounded-sm group"
                     onClick={() => {
+                      onAdd('locationCard');
+                      setIsCardDropdownOpen(false);
+                    }}
+                  >
+                    <div className="w-6 h-6 bg-rose-500/20 dark:bg-rose-500/10 rounded-md flex items-center justify-center group-hover:bg-rose-500/30 dark:group-hover:bg-rose-500/20 transition-colors flex-shrink-0">
+                      <CalendarIcon className="w-3.5 h-3.5 text-rose-600 dark:text-rose-500" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-xs font-medium">Location Card</div>
+                      <div className="text-[11px] text-muted-foreground">Place or Address</div>
+                    </div>
+                  </button>
+
+                  <button
+                    className="w-full px-2 py-1 text-left hover:bg-accent hover:text-accent-foreground flex items-center gap-2 transition-colors rounded-sm group"
+                    onClick={() => {
                       onAdd('imageCard');
                       setIsCardDropdownOpen(false);
                     }}
@@ -275,6 +291,22 @@ function TopNav({
                     <div className="flex-1 min-w-0">
                       <div className="text-xs font-medium">List Card</div>
                       <div className="text-[11px] text-muted-foreground">Checklist items</div>
+                    </div>
+                  </button>
+
+                  <button
+                    className="w-full px-2 py-1 text-left hover:bg-accent hover:text-accent-foreground flex items-center gap-2 transition-colors rounded-sm group"
+                    onClick={() => {
+                      onAdd('numberCard');
+                      setIsCardDropdownOpen(false);
+                    }}
+                  >
+                    <div className="w-6 h-6 bg-green-500/20 dark:bg-green-500/10 rounded-md flex items-center justify-center group-hover:bg-green-500/30 dark:group-hover:bg-green-500/20 transition-colors flex-shrink-0">
+                      <span className="text-green-700 dark:text-green-400 text-xs font-bold">#</span>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-xs font-medium">Number Card</div>
+                      <div className="text-[11px] text-muted-foreground">Large numeric value</div>
                     </div>
                   </button>
                 </div>

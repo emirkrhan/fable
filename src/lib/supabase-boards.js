@@ -101,30 +101,33 @@ export async function updateBoardName(boardId, newName) {
 }
 
 // Save board content (nodes and edges)
-export async function saveBoardContent(boardId, nodes, edges) {
+export async function saveBoardContent(boardId, nodes, edges, options = {}) {
   const { data: { user } } = await supabase.auth.getUser();
 
   if (!user) {
     throw new Error('User not authenticated');
   }
 
-  // Check if user has permission to save (owner or shared user)
-  const board = await getBoard(boardId);
-  const permission = getBoardPermission(board, user.id);
-  
-  if (!permission) {
-    throw new Error('User does not have permission to save this board');
-  }
+  // Optimize permission check: a single filtered update ensures ownership
+  // If sharing is re-enabled later, extend this condition accordingly
 
   // Comment-only users can save (to add their comments)
   // Edit users and owners can save everything
-  const { error } = await supabase
+  let query = supabase
     .from('boards')
     .update({
       nodes: nodes || [],
       edges: edges || []
     })
-    .eq('id', boardId);
+    .eq('id', boardId)
+    .eq('owner_id', user.id);
+
+  // Support abort via AbortController if provided
+  if (options?.signal && typeof query.abortSignal === 'function') {
+    query = query.abortSignal(options.signal);
+  }
+
+  const { error } = await query;
 
   if (error) throw error;
   return true;

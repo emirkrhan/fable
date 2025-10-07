@@ -48,17 +48,12 @@ export function useAutoSave(saveFunction, data, options = {}) {
     const previousSerialized = previousDataRef.current;
 
     if (previousSerialized === null) {
-      // First time, just store the data - don't consider it changed
+      // First render: seed snapshot, do not trigger save
       previousDataRef.current = currentSerialized;
       return false;
     }
 
-    const changed = currentSerialized !== previousSerialized;
-    if (changed) {
-      previousDataRef.current = currentSerialized;
-    }
-
-    return changed;
+    return currentSerialized !== previousSerialized;
   }, [data, serializeData]);
 
   const performSave = useCallback(async () => {
@@ -75,7 +70,10 @@ export function useAutoSave(saveFunction, data, options = {}) {
     setStatus('saving');
 
     try {
+      // saveFunction kendi içinde zaman aşımı/iptal yönetimi yapar
       await saveFunction();
+      // Update snapshot AFTER successful save to avoid losing retries on failure
+      previousDataRef.current = serializeData(data);
       setStatus('saved');
       setLastSaved(new Date());
 
@@ -92,7 +90,7 @@ export function useAutoSave(saveFunction, data, options = {}) {
     } finally {
       isSavingRef.current = false;
     }
-  }, [saveFunction, hasDataChanged]);
+  }, [saveFunction, hasDataChanged, serializeData, data]);
 
   useEffect(() => {
     if (!enabled) return;
@@ -112,30 +110,7 @@ export function useAutoSave(saveFunction, data, options = {}) {
     };
   }, [data, enabled, debounceMs, performSave]);
 
-  // Try to save on page hide/unload to avoid data loss
-  useEffect(() => {
-    if (!enabled) return;
-
-    const handleVisibilityChange = () => {
-      if (document.hidden) {
-        // Best-effort save
-        performSave();
-      }
-    };
-
-    const handleBeforeUnload = () => {
-      // Best-effort save (cannot guarantee completion)
-      performSave();
-    };
-
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    window.addEventListener('beforeunload', handleBeforeUnload);
-
-    return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-      window.removeEventListener('beforeunload', handleBeforeUnload);
-    };
-  }, [enabled, performSave]);
+  // No visibility/unload behavior: keep auto-save strictly debounce-on-change
 
   // Manual save trigger (bypasses debounce)
   const triggerSave = useCallback(async () => {
