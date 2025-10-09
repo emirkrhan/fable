@@ -31,30 +31,36 @@ export function useAutoSave(saveFunction, data, options = {}) {
   const isSavingRef = useRef(false);
   const saveQueuedRef = useRef(false);
 
-  const serializeData = useCallback((data) => {
+  // Optimized comparison for workspace data
+  // Use JSON.stringify but only when data structure is reasonable size
+  const createDataFingerprint = useCallback((data) => {
     try {
       if (typeof data === 'string' || typeof data === 'number') {
         return String(data);
       }
+
+      // For workspace data, we need to detect content changes too
+      // JSON.stringify is necessary but we'll optimize by doing it only once per check
       return JSON.stringify(data);
-    } catch {
+    } catch (error) {
+      console.error('Error creating fingerprint:', error);
       return null;
     }
   }, []);
 
-  // Check if data has actually changed
+  // Check if data has actually changed using fingerprint comparison
   const hasDataChanged = useCallback(() => {
-    const currentSerialized = serializeData(data);
-    const previousSerialized = previousDataRef.current;
+    const currentFingerprint = createDataFingerprint(data);
+    const previousFingerprint = previousDataRef.current;
 
-    if (previousSerialized === null) {
+    if (previousFingerprint === null) {
       // First render: seed snapshot, do not trigger save
-      previousDataRef.current = currentSerialized;
+      previousDataRef.current = currentFingerprint;
       return false;
     }
 
-    return currentSerialized !== previousSerialized;
-  }, [data, serializeData]);
+    return currentFingerprint !== previousFingerprint;
+  }, [data, createDataFingerprint]);
 
   const performSave = useCallback(async () => {
     if (isSavingRef.current) {
@@ -62,44 +68,85 @@ export function useAutoSave(saveFunction, data, options = {}) {
       return;
     }
 
-    if (!hasDataChanged()) {
+    const currentFingerprint = createDataFingerprint(data);
+    const previousFingerprint = previousDataRef.current;
+
+    // Check if data has changed
+    if (previousFingerprint !== null && currentFingerprint === previousFingerprint) {
       return;
     }
 
     isSavingRef.current = true;
     setStatus('saving');
 
-    try {
-      // saveFunction kendi içinde zaman aşımı/iptal yönetimi yapar
-      await saveFunction();
-      // Update snapshot AFTER successful save to avoid losing retries on failure
-      previousDataRef.current = serializeData(data);
-      setStatus('saved');
-      setLastSaved(new Date());
+    let retries = 0;
+    const maxRetries = 2;
 
-      setTimeout(() => setStatus('idle'), 2000);
+    while (retries <= maxRetries) {
+      try {
+        // saveFunction kendi içinde zaman aşımı/iptal yönetimi yapar
+        await saveFunction();
+        // Update snapshot AFTER successful save to avoid losing retries on failure
+        previousDataRef.current = currentFingerprint;
+        setStatus('saved');
+        setLastSaved(new Date());
 
-      if (saveQueuedRef.current) {
-        saveQueuedRef.current = false;
-        setTimeout(() => performSave(), 100);
+        setTimeout(() => setStatus('idle'), 2000);
+
+        if (saveQueuedRef.current) {
+          saveQueuedRef.current = false;
+          setTimeout(() => performSave(), 100);
+        }
+
+        // Success - break out of retry loop
+        break;
+      } catch (error) {
+        retries++;
+        console.error(`Auto-save failed (attempt ${retries}/${maxRetries + 1}):`, error);
+
+        if (retries > maxRetries) {
+          // All retries exhausted
+          setStatus('error');
+          setTimeout(() => setStatus('idle'), 3000);
+        } else {
+          // Wait before retrying (exponential backoff)
+          await new Promise(resolve => setTimeout(resolve, 1000 * retries));
+        }
       }
-    } catch (error) {
-      console.error('Auto-save failed:', error);
-      setStatus('error');
-      setTimeout(() => setStatus('idle'), 3000);
-    } finally {
-      isSavingRef.current = false;
     }
-  }, [saveFunction, hasDataChanged, serializeData, data]);
+
+    isSavingRef.current = false;
+  }, [saveFunction, createDataFingerprint, data]);
 
   useEffect(() => {
-    if (!enabled) return;
+    if (!enabled) {
+      console.log('🔴 Auto-save disabled');
+      return;
+    }
+
+    const currentFingerprint = createDataFingerprint(data);
+
+    // Initialize snapshot on first render
+    if (previousDataRef.current === null) {
+      console.log('🆕 First render - initializing fingerprint');
+      previousDataRef.current = currentFingerprint;
+      return;
+    }
+
+    // Check if data actually changed before setting timer
+    if (currentFingerprint === previousDataRef.current) {
+      console.log('✅ Data unchanged - skipping save');
+      return;
+    }
+
+    console.log('🔄 Data changed - scheduling save in', debounceMs, 'ms');
 
     if (saveTimerRef.current) {
       clearTimeout(saveTimerRef.current);
     }
 
     saveTimerRef.current = setTimeout(() => {
+      console.log('💾 Executing auto-save');
       performSave();
     }, debounceMs);
 
@@ -108,7 +155,7 @@ export function useAutoSave(saveFunction, data, options = {}) {
         clearTimeout(saveTimerRef.current);
       }
     };
-  }, [data, enabled, debounceMs, performSave]);
+  }, [data, enabled, debounceMs, performSave, createDataFingerprint]);
 
   // No visibility/unload behavior: keep auto-save strictly debounce-on-change
 

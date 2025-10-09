@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback, memo } from 'react';
 import { Handle, Position, useReactFlow, useUpdateNodeInternals } from 'reactflow';
-import { MapPin, GripVertical, MoreVertical, Trash2 } from 'lucide-react';
+import { MapPin, GripVertical, MoreVertical, Trash2, Star } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogAction, AlertDialogCancel } from '@/components/ui/alert-dialog';
@@ -25,6 +25,7 @@ function LocationCard({ id, data, selected }) {
   const dropdownRef = useRef(null);
 
   const isReadOnly = data.isReadOnly || false;
+  const isFocusPoint = data.isFocusPoint || false;
   const [location, setLocation] = useState(data.location || '');
 
   useEffect(() => {
@@ -38,24 +39,34 @@ function LocationCard({ id, data, selected }) {
   const onSaveLocation = useCallback(() => {
     if (isReadOnly) return;
     const trimmed = (location || '').trim();
-    setNodes((nds) => nds.map((node) => node.id === id ? { ...node, data: { ...node.data, location: trimmed } } : node));
-    if (typeof data.onNodeDataChange === 'function') {
+
+    // Use callback pattern - no setNodes needed
+    if (typeof data?.onNodeDataChange === 'function') {
       data.onNodeDataChange(id, { location: trimmed });
     }
-  }, [id, location, setNodes, isReadOnly, data]);
+  }, [id, location, isReadOnly, data]);
 
   const toggleDropdown = useCallback(() => {
     setIsDropdownOpen((prev) => !prev);
   }, []);
 
   const handleDelete = useCallback(() => {
-    setNodes((nds) => nds.filter((node) => node.id !== id));
-    setEdges((eds) => eds.filter((edge) => edge.source !== id && edge.target !== id));
-    if (typeof data.onDeleteNode === 'function') {
+    // Use callback pattern from ReactFlowPlanner
+    if (typeof data?.onDeleteNode === 'function') {
       data.onDeleteNode(id);
     }
     toast('Location card deleted.');
-  }, [id, setNodes, setEdges, data]);
+  }, [id, data]);
+
+  const toggleFocusPoint = useCallback(() => {
+    if (isReadOnly) return;
+    if (typeof data?.onNodeDataChange === 'function') {
+      data.onNodeDataChange(id, { isFocusPoint: !isFocusPoint });
+    }
+    toast(isFocusPoint ? "Removed from focus" : "Set as focus point", {
+      icon: <Star className="w-4 h-4" />
+    });
+  }, [id, isFocusPoint, isReadOnly, data]);
 
   useEffect(() => {
     function handleClickOutside(event) {
@@ -76,7 +87,8 @@ function LocationCard({ id, data, selected }) {
           'bg-gradient-to-r from-rose-200 to-rose-300 dark:from-rose-950/50 dark:to-rose-900/50 border-2 border-rose-400 dark:border-rose-800 rounded-lg w-72 h-12 node-card relative group',
           'transition-all duration-200',
           selected && 'border-rose-400',
-          !isReadOnly && 'cursor-pointer'
+          !isReadOnly && 'cursor-pointer',
+          isFocusPoint && "ring-4 ring-yellow-400/60 shadow-[0_0_30px_rgba(250,204,21,0.5)] border-yellow-400/50"
         )}
         onClick={(e) => {
           if (!isReadOnly) e.stopPropagation();
@@ -124,8 +136,17 @@ function LocationCard({ id, data, selected }) {
                   <MoreVertical className="w-3 h-3 text-rose-700 dark:text-white" />
                 </button>
                 {isDropdownOpen && (
-                  <div className="absolute right-0 top-full mt-1 w-32 bg-popover border border-border rounded-md shadow-lg z-[9999] animate-in fade-in-0 zoom-in-95">
+                  <div className="absolute right-0 top-full mt-1 w-36 bg-popover border border-border rounded-md shadow-lg z-[9999] animate-in fade-in-0 zoom-in-95">
                     <div className="py-1 px-1">
+                      <button
+                        className="w-full px-2 py-1.5 text-xs text-left hover:bg-accent hover:text-accent-foreground flex items-center gap-2 transition-colors rounded-sm"
+                        onClick={(e) => { e.stopPropagation(); toggleFocusPoint(); setIsDropdownOpen(false); }}
+                      >
+                        <Star className={cn("w-3 h-3", isFocusPoint && "fill-yellow-500 text-yellow-500")} />
+                        {isFocusPoint ? "Remove focus" : "Set as focus"}
+                      </button>
+                    </div>
+                    <div className="py-1 px-1 border-t border-border">
                       <button
                         className="w-full px-2 py-1.5 text-xs text-left hover:bg-destructive/10 hover:text-destructive flex items-center gap-2 transition-colors rounded-sm"
                         onClick={(e) => { e.stopPropagation(); setConfirmOpen(true); setIsDropdownOpen(false); }}

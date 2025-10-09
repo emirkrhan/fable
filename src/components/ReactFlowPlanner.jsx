@@ -29,8 +29,9 @@ import WhatsNewCard from './WhatsNewCard';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTheme } from '@/contexts/ThemeContext';
-import { useAutoSave } from '@/hooks/useAutoSave';
-import { getBoard, saveBoardContent, getBoardPermission, updateBoardName } from '@/lib/supabase-boards';
+import { useAutoSaveOptimized } from '@/hooks/useAutoSaveOptimized';
+import { useChangeTracker } from '@/hooks/useChangeTracker';
+import { getBoard, saveBoardContent, saveBoardPatches, getBoardPermission, updateBoardName } from '@/lib/supabase-boards';
 import { useRouter } from 'next/navigation';
 import ShareBoardDialog from './ShareBoardDialog';
 
@@ -96,7 +97,7 @@ const proOptions = { hideAttribution: true };
 const STORAGE_KEY = 'story-planner:flow:v1';
 
 export default function ReactFlowPlanner({ boardId }) {
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const { theme } = useTheme();
   const router = useRouter();
   const [nodes, setNodes, onNodesChangeOriginal] = useNodesState([]);
@@ -109,19 +110,32 @@ export default function ReactFlowPlanner({ boardId }) {
   const [boardPermission, setBoardPermission] = useState(null);
   const [shareDialogOpen, setShareDialogOpen] = useState(false);
   const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 });
+
+  // Initialize change tracker for incremental updates
+  const {
+    trackChange,
+    trackNodeDataChange,
+    trackEdgeDataChange,
+    getMergedChanges,
+    clearChanges,
+    getChangeCount
+  } = useChangeTracker();
+
   // Remove online/offline gating: keep behavior simple
 
   // Collaboration disabled: no realtime updates
 
-  // onNodesChange
+  // onNodesChange - with change tracking
   const onNodesChange = useCallback((changes) => {
     onNodesChangeOriginal(changes);
-  }, [onNodesChangeOriginal]);
+    trackChange('nodes', changes);
+  }, [onNodesChangeOriginal, trackChange]);
 
-  // onEdgesChange
+  // onEdgesChange - with change tracking
   const onEdgesChange = useCallback((changes) => {
     onEdgesChangeOriginal(changes);
-  }, [onEdgesChangeOriginal]);
+    trackChange('edges', changes);
+  }, [onEdgesChangeOriginal, trackChange]);
 
   // Global click handler to close dropdowns
   useEffect(() => {
@@ -152,7 +166,19 @@ export default function ReactFlowPlanner({ boardId }) {
 
   // Load board data once on mount
   useEffect(() => {
-    if (!boardId || !user?.uid) {
+    // Wait for auth to finish loading before checking
+    if (authLoading) {
+      return;
+    }
+
+    if (!boardId) {
+      router.push('/boards');
+      return;
+    }
+
+    // Check user inside effect to avoid unnecessary re-renders
+    const currentUserId = user?.uid;
+    if (!currentUserId) {
       router.push('/boards');
       return;
     }
@@ -160,7 +186,7 @@ export default function ReactFlowPlanner({ boardId }) {
     const loadBoard = async () => {
       setIsLoading(true);
       try {
-        console.log('🚀 Loading board:', boardId, 'for user:', user.uid);
+        console.log('🚀 Loading board:', boardId, 'for user:', currentUserId);
         const board = await getBoard(boardId);
 
         if (!board) {
@@ -172,7 +198,7 @@ export default function ReactFlowPlanner({ boardId }) {
 
         console.log('✅ Board loaded:', board);
 
-        const permission = getBoardPermission(board, user.uid);
+        const permission = getBoardPermission(board, currentUserId);
         console.log('🔐 User permission:', permission);
         
         if (!permission) {
@@ -211,13 +237,35 @@ export default function ReactFlowPlanner({ boardId }) {
         setIsLoading(false);
       } catch (error) {
         console.error('💥 Error loading board:', error);
-        toast.error('Failed to load board: ' + error.message);
-        router.push('/boards');
+
+        // Provide more specific error messages
+        let errorMessage = 'Failed to load board';
+        if (error.message?.includes('not authenticated')) {
+          errorMessage = 'Please sign in to view this board';
+        } else if (error.message?.includes('not found')) {
+          errorMessage = 'Board not found';
+        } else if (error.message?.includes('access denied')) {
+          errorMessage = 'You do not have access to this board';
+        } else if (error.message) {
+          errorMessage = error.message;
+        }
+
+        toast.error(errorMessage);
+
+        // Add a small delay before redirect to ensure toast is visible
+        setTimeout(() => {
+          router.push('/boards');
+        }, 1500);
+      } finally {
+        setIsLoading(false);
       }
     };
 
     loadBoard();
-  }, [boardId, user?.uid, router]);
+    // Only depend on boardId and authLoading to avoid unnecessary re-fetches
+    // user check is done inside the effect
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [boardId, authLoading]);
 
   // Collaboration disabled: no cursor tracking
 
@@ -413,7 +461,9 @@ export default function ReactFlowPlanner({ boardId }) {
         node.id === id ? { ...node, data: { ...node.data, ...newData } } : node
       )
     );
-  }, [setNodes]);
+    // Track data changes for incremental updates
+    trackNodeDataChange(id, newData);
+  }, [setNodes, trackNodeDataChange]);
 
   const deleteNode = useCallback((id) => {
     setNodes((nds) => nds.filter((node) => node.id !== id));
@@ -470,7 +520,7 @@ export default function ReactFlowPlanner({ boardId }) {
       // Clean and filter node data - remove functions like onAddComment, isReadOnly, isBoardOwner, onEditingChange, onNodeDataChange, and onDeleteNode
       const cleanNodes = nodes.map(({ id, type, position, data }) => {
         // Remove functions and temporary props from data
-        const { onAddComment, isReadOnly, isBoardOwner, onEditingChange, onNodeDataChange, onDeleteNode, ...cleanData } = data || {};
+        const { onAddComment, isReadOnly, isBoardOwner, onEditingChange, onNodeDataChange, onDeleteNode, boardId: _boardId, ...cleanData } = data || {};
         return {
           id: id || '',
           type: type || 'storyCard',
@@ -492,9 +542,6 @@ export default function ReactFlowPlanner({ boardId }) {
         ...(style && { style })
       }));
 
-      // Abortable save with size guard
-      const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
-
       // Size guard: if payload is too big, fail fast with clearer error
       const payloadSize = new Blob([JSON.stringify({ nodes: cleanNodes, edges: cleanEdges })]).size;
       const maxPayloadBytes = 4 * 1024 * 1024; // 4MB soft limit
@@ -502,22 +549,22 @@ export default function ReactFlowPlanner({ boardId }) {
         throw new Error('Workspace too large to save (exceeds 4MB). Consider splitting.');
       }
 
-      // Hard timeout for manual save as well
+      // Save to board with 10 second timeout
+      // Reduced from 30s to fail faster on network issues
       const withTimeout = (promise, ms) =>
         new Promise((resolve, reject) => {
-          const id = setTimeout(() => {
-            if (controller) controller.abort();
-            reject(new Error('Save timeout'));
+          const timeoutId = setTimeout(() => {
+            reject(new Error('Save timeout - operation took longer than expected. Please check your connection.'));
           }, ms);
           promise
-            .then((res) => { clearTimeout(id); resolve(res); })
-            .catch((err) => { clearTimeout(id); reject(err); });
+            .then((res) => { clearTimeout(timeoutId); resolve(res); })
+            .catch((err) => { clearTimeout(timeoutId); reject(err); });
         });
 
-      // Save to board
+      // Save to board with 10 second timeout
       const saved = await withTimeout(
-        saveBoardContent(boardId, cleanNodes, cleanEdges, { signal: controller?.signal }),
-        15000
+        saveBoardContent(boardId, cleanNodes, cleanEdges),
+        10000
       );
 
       // Collaboration disabled: no broadcast
@@ -532,19 +579,32 @@ export default function ReactFlowPlanner({ boardId }) {
       console.error('Failed to save board', e);
       if (!silent) {
         const message = e?.message?.includes('timeout')
-          ? 'Save timed out. Check your connection.'
+          ? 'Save timed out. Please check your internet connection and try again.'
           : e?.message || 'Failed to save board';
         toast(message, { variant: "destructive" });
       }
       throw e; // Re-throw for auto-save error handling
     }
-  }, [boardId, nodes, edges, currentBoard]);
+  }, [boardId, nodes, edges]);
 
   const workspaceData = useMemo(() => {
-    const cleanNodes = nodes.map(({ id, type, position, data }) => {
+    const cleanNodes = nodes.map((node) => {
+      const { id, type, position, data } = node;
       if (!data) return { id, type, position, data: {} };
-      const { onAddComment, isReadOnly, isBoardOwner, onEditingChange, onNodeDataChange, onDeleteNode, ...cleanData } = data;
-      return { id, type, position, data: cleanData };
+
+      // Clean data by removing functions and temporary props
+      const { onAddComment, isReadOnly, isBoardOwner, onEditingChange, onNodeDataChange, onDeleteNode, boardId: _boardId, ...cleanData } = data;
+
+      return {
+        id,
+        type,
+        // Round position to avoid floating point precision issues
+        position: position ? {
+          x: Math.round(position.x * 100) / 100,
+          y: Math.round(position.y * 100) / 100
+        } : { x: 0, y: 0 },
+        data: cleanData
+      };
     });
 
     const cleanEdges = edges.map(({ id, source, target, sourceHandle, targetHandle, type, data, animated, style }) => ({
@@ -555,18 +615,77 @@ export default function ReactFlowPlanner({ boardId }) {
   }, [nodes, edges]);
 
   // Silent save function for auto-save (no toasts)
+  // Uses patch-based updates when possible, falls back to full save
   const silentSave = useCallback(async () => {
-    await handleSave(true);
-  }, [handleSave]);
+    const changeCount = getChangeCount();
 
-  const { status: saveStatus } = useAutoSave(
+    // If we have tracked changes, use incremental update
+    if (changeCount > 0 && changeCount < 50) {
+      try {
+        const patches = getMergedChanges();
+        console.log(`🚀 Using incremental update (${patches.length} patches)`);
+
+        await saveBoardPatches(boardId, patches);
+
+        // Clear changes after successful save
+        clearChanges();
+
+        console.log('✅ Incremental save successful');
+        return;
+      } catch (error) {
+        console.warn('⚠️ Incremental save failed, falling back to full save:', error);
+        // Fall through to full save
+      }
+    }
+
+    // Fallback to full state save
+    // (used for large change sets or when incremental fails)
+    console.log('📦 Using full state save');
+    await handleSave(true);
+    clearChanges(); // Clear tracked changes after full save
+  }, [handleSave, getChangeCount, getMergedChanges, clearChanges, boardId]);
+
+  const {
+    status: saveStatus,
+    hasUnsavedChanges,
+    loadFromLocalStorage
+  } = useAutoSaveOptimized(
     silentSave,
     workspaceData,
     {
-      debounceMs: 2000,
+      debounceMs: 2000, // Reduced from 3000ms for faster response
       enabled: !!user?.uid && !isLoading && !!boardPermission,
+      storageKey: `board-draft-${boardId}`, // Unique key per board
     }
   );
+
+  // Check for localStorage recovery on mount (after auto-save hook is initialized)
+  useEffect(() => {
+    if (!boardId || !user?.uid || !loadFromLocalStorage) return;
+
+    const checkForRecovery = () => {
+      const draft = loadFromLocalStorage();
+      if (draft && draft.nodes && draft.edges) {
+        const draftTime = localStorage.getItem(`board-draft-${boardId}`)
+          ? JSON.parse(localStorage.getItem(`board-draft-${boardId}`)).timestamp
+          : null;
+
+        if (draftTime) {
+          const minutesAgo = Math.floor((Date.now() - new Date(draftTime).getTime()) / 60000);
+          if (minutesAgo < 60) {
+            toast.info(`Found unsaved changes from ${minutesAgo} minutes ago. Check console to recover.`, {
+              duration: 10000,
+            });
+            console.log('💾 Recovered draft available:', draft);
+          }
+        }
+      }
+    };
+
+    // Run check after a brief delay to ensure everything is loaded
+    const timeoutId = setTimeout(checkForRecovery, 1000);
+    return () => clearTimeout(timeoutId);
+  }, [boardId, user?.uid, loadFromLocalStorage]);
 
   const handleImportWorkspace = useCallback(() => {
     if (!user?.uid) {
@@ -722,7 +841,7 @@ export default function ReactFlowPlanner({ boardId }) {
     }));
   }, [edges, boardPermission]);
 
-  if (isLoading) {
+  if (isLoading || authLoading) {
     return (
       <ReactFlowProvider>
       <TopNav

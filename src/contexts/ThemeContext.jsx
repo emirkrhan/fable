@@ -9,21 +9,18 @@ const ThemeContext = createContext({
 });
 
 export function ThemeProvider({ children }) {
-  const [theme, setThemeState] = useState('dark');
-  const [mounted, setMounted] = useState(false);
+  // Initialize with default, will be synced from localStorage in useEffect
+  const [theme, setThemeState] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('story-planner-theme') || 'dark';
+    }
+    return 'dark';
+  });
 
-  // Mount sonrası localStorage'dan tema oku
+  // Sync theme state with localStorage on mount
   useEffect(() => {
-    setMounted(true);
     const savedTheme = localStorage.getItem('story-planner-theme') || 'dark';
     setThemeState(savedTheme);
-
-    // HTML'e class ekle
-    if (savedTheme === 'dark') {
-      document.documentElement.classList.add('dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-    }
   }, []);
 
   const setTheme = (newTheme) => {
@@ -41,11 +38,6 @@ export function ThemeProvider({ children }) {
   const toggleTheme = () => {
     setTheme(theme === 'dark' ? 'light' : 'dark');
   };
-
-  // Hydration hatası önlemek için mount olmadan önce render etme
-  if (!mounted) {
-    return <>{children}</>;
-  }
 
   return (
     <ThemeContext.Provider value={{ theme, setTheme, toggleTheme }}>

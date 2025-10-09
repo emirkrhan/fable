@@ -18,7 +18,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Empty, EmptyHeader, EmptyMedia, EmptyTitle, EmptyDescription, EmptyContent } from '@/components/ui/empty';
 
 export default function BoardList() {
-  const { user, logout } = useAuth();
+  const { user, logout, loading: authLoading } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const router = useRouter();
   const [boards, setBoards] = useState([]);
@@ -44,13 +44,16 @@ export default function BoardList() {
   const sortRef = useRef(null);
 
   useEffect(() => {
+    // Wait for auth to finish loading before checking user
+    if (authLoading) return;
+
     if (!user) {
       router.push('/login');
       return;
     }
     console.log('User data:', { photoURL: user.photoURL, displayName: user.displayName, email: user.email });
     loadBoards();
-  }, [user, router]);
+  }, [user, router, authLoading]);
 
   // Close avatar dropdown when clicking outside
   useEffect(() => {

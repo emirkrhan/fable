@@ -20,11 +20,12 @@ export function AuthProvider({ children }) {
   const ensureUserProfile = useCallback(async (authUser) => {
     try {
       console.log('🔍 Waiting for user profile:', authUser.id);
-      
-      // Wait for trigger to create profile (max ~10 seconds, 20 retries)
-      let retries = 20;
+
+      // Wait for trigger to create profile (max ~4 seconds, 8 retries)
+      // Reduced from 20 retries to prevent long loading times
+      let retries = 8;
       let existingUser = null;
-      
+
       while (retries > 0 && !existingUser) {
         const { data, error: selectError } = await supabase
           .from('users')
@@ -34,7 +35,8 @@ export function AuthProvider({ children }) {
 
         if (selectError) {
           console.error('❌ Error checking user profile:', selectError);
-          return;
+          // Don't return immediately, try upsert as fallback
+          break;
         }
 
         if (data) {
@@ -43,7 +45,7 @@ export function AuthProvider({ children }) {
           break;
         }
 
-        // Wait 300ms before retry
+        // Wait 500ms before retry
         retries--;
         if (retries > 0) {
           console.log(`⏳ Profile not ready yet, retrying... (${retries} left)`);
@@ -158,7 +160,7 @@ export function AuthProvider({ children }) {
 
   return (
     <AuthContext.Provider value={value}>
-      {!loading && children}
+      {children}
     </AuthContext.Provider>
   );
 }

@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect, useCallback, memo } from 'react';
 import { Handle, Position, useReactFlow, useUpdateNodeInternals } from 'reactflow';
 import { motion } from 'framer-motion';
-import { GripVertical, Trash2, MoreVertical, User, Image as ImageIcon, Check, X } from 'lucide-react';
+import { GripVertical, Trash2, MoreVertical, User, Image as ImageIcon, Check, X, Star } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogAction, AlertDialogCancel } from '@/components/ui/alert-dialog';
 import { toast } from 'sonner';
@@ -31,6 +31,7 @@ function CharacterCard({ id, data, selected }) {
   const updateNodeInternals = useUpdateNodeInternals();
 
   const isReadOnly = data.isReadOnly || false;
+  const isFocusPoint = data.isFocusPoint || false;
 
   const profileUrl = data.profileUrl || '';
   const firstName = data.firstName || '';
@@ -56,18 +57,9 @@ function CharacterCard({ id, data, selected }) {
 
   const handleSave = useCallback(() => {
     if (isReadOnly) return;
-    setNodes((nds) => nds.map((node) => node.id === id ? {
-      ...node,
-      data: {
-        ...node.data,
-        profileUrl: tempProfileUrl,
-        firstName: tempFirstName,
-        lastName: tempLastName,
-        synopsis: tempSynopsis,
-      }
-    } : node));
-    setIsEditing(false);
-    if (typeof (data && data.onNodeDataChange) === 'function') {
+
+    // Use callback pattern from ReactFlowPlanner
+    if (typeof data?.onNodeDataChange === 'function') {
       data.onNodeDataChange(id, {
         profileUrl: tempProfileUrl,
         firstName: tempFirstName,
@@ -75,70 +67,44 @@ function CharacterCard({ id, data, selected }) {
         synopsis: tempSynopsis,
       });
     }
-  }, [id, tempProfileUrl, tempFirstName, tempLastName, tempSynopsis, setNodes, isReadOnly]);
+    setIsEditing(false);
+  }, [id, tempProfileUrl, tempFirstName, tempLastName, tempSynopsis, isReadOnly, data]);
 
-  // Popover açarken z-index'i ayarla
+  // Popover açarken focus yap
   const openPopover = useCallback(() => {
     if (isReadOnly) return;
-    setNodes((nds) => nds.map((node) => 
-      node.id === id ? { ...node, zIndex: 1000 } : node
-    ));
     setIsPopoverOpen(true);
     setIsEditing(true);
     setTimeout(() => firstNameRef.current?.focus(), 0);
-  }, [id, setNodes, isReadOnly]);
+  }, [isReadOnly]);
 
-  // Popover kapatırken z-index'i sıfırla ve değişiklikleri kaydet
+  // Popover kapatırken değişiklikleri kaydet
   const closePopover = useCallback(() => {
-    if (isReadOnly) {
-      setIsPopoverOpen(false);
-      setIsEditing(false);
-      setNodes((nds) => nds.map((node) =>
-        node.id === id ? { ...node, zIndex: undefined } : node
-      ));
-      return;
-    }
-
-    // Önce popover state'lerini kapat
     setIsPopoverOpen(false);
     setIsEditing(false);
 
-    // Değişiklikleri kaydet - React batch update sonrası
-    setTimeout(() => {
-      setNodes((nds) => nds.map((node) => {
-        if (node.id !== id) return node;
+    if (!isReadOnly) {
+      // Use callback pattern - no setTimeout needed
+      if (typeof data?.onNodeDataChange === 'function') {
+        data.onNodeDataChange(id, {
+          profileUrl: tempProfileUrl,
+          firstName: tempFirstName,
+          lastName: tempLastName,
+          synopsis: tempSynopsis,
+        });
+      }
+    }
+  }, [id, isReadOnly, tempProfileUrl, tempFirstName, tempLastName, tempSynopsis, data]);
 
-        return {
-          ...node,
-          data: {
-            ...node.data,
-            profileUrl: tempProfileUrl,
-            firstName: tempFirstName,
-            lastName: tempLastName,
-            synopsis: tempSynopsis,
-          },
-          zIndex: undefined
-        };
-      }));
-    }, 0);
-  }, [id, setNodes, isReadOnly, tempProfileUrl, tempFirstName, tempLastName, tempSynopsis]);
-
-  // Dropdown açarken z-index'i ayarla
+  // Dropdown toggle
   const toggleDropdown = useCallback(() => {
-    const willOpen = !isDropdownOpen;
-    setNodes((nds) => nds.map((node) => 
-      node.id === id ? { ...node, zIndex: willOpen ? 1000 : undefined } : node
-    ));
-    setIsDropdownOpen(willOpen);
-  }, [id, setNodes, isDropdownOpen]);
+    setIsDropdownOpen(!isDropdownOpen);
+  }, [isDropdownOpen]);
 
-  // Dropdown kapatırken z-index'i sıfırla
+  // Dropdown kapatma
   const closeDropdown = useCallback(() => {
-    setNodes((nds) => nds.map((node) => 
-      node.id === id ? { ...node, zIndex: undefined } : node
-    ));
     setIsDropdownOpen(false);
-  }, [id, setNodes]);
+  }, []);
 
   useEffect(() => {
     function handleClickOutside(event) {
@@ -161,13 +127,12 @@ function CharacterCard({ id, data, selected }) {
 
 
   const handleDelete = useCallback(() => {
-    setNodes((nds) => nds.filter((node) => node.id !== id));
-    setEdges((eds) => eds.filter((edge) => edge.source !== id && edge.target !== id));
-    toast('Character card deleted.', { icon: <Trash2 className="w-4 h-4" /> });
-    if (typeof (data && data.onDeleteNode) === 'function') {
+    // Use callback pattern from ReactFlowPlanner
+    if (typeof data?.onDeleteNode === 'function') {
       data.onDeleteNode(id);
     }
-  }, [id, setNodes, setEdges]);
+    toast('Character card deleted.', { icon: <Trash2 className="w-4 h-4" /> });
+  }, [id, data]);
 
   const duplicateCard = useCallback(() => {
     try {
@@ -202,6 +167,16 @@ function CharacterCard({ id, data, selected }) {
     }
   }, [getNodes, id, setNodes, profileUrl, firstName, lastName, synopsis, data.onNodeDataChange, data.onDeleteNode]);
 
+  const toggleFocusPoint = useCallback(() => {
+    if (isReadOnly) return;
+    if (typeof data?.onNodeDataChange === 'function') {
+      data.onNodeDataChange(id, { isFocusPoint: !isFocusPoint });
+    }
+    toast(isFocusPoint ? "Removed from focus" : "Set as focus point", {
+      icon: <Star className="w-4 h-4" />
+    });
+  }, [id, isFocusPoint, isReadOnly, data]);
+
   const initials = (firstName || lastName) ? `${(firstName || '').charAt(0)}${(lastName || '').charAt(0)}`.toUpperCase() : '';
 
   return (
@@ -211,7 +186,8 @@ function CharacterCard({ id, data, selected }) {
           "bg-card border border-border rounded-lg w-80 h-auto node-card relative group",
           "transition-colors duration-150",
           selected && "border-primary/40",
-          !isReadOnly && "cursor-pointer"
+          !isReadOnly && "cursor-pointer",
+          isFocusPoint && "ring-4 ring-yellow-400/60 shadow-[0_0_30px_rgba(250,204,21,0.5)] border-yellow-400/50"
         )}
         onClick={() => { if (!isReadOnly) { openPopover(); } }}
       >
@@ -252,6 +228,15 @@ function CharacterCard({ id, data, selected }) {
                 {isDropdownOpen && (
                   <div className="absolute right-0 top-full mt-1 w-40 bg-popover border border-border rounded-md shadow-lg z-[9999] animate-in fade-in-0 zoom-in-95">
                     <div className="py-1 px-1">
+                      <button
+                        className="w-full px-2 py-1.5 text-sm text-left hover:bg-accent hover:text-accent-foreground flex items-center gap-2 transition-colors rounded-sm"
+                        onClick={(e) => { e.stopPropagation(); toggleFocusPoint(); closeDropdown(); }}
+                      >
+                        <Star className={cn("w-4 h-4", isFocusPoint && "fill-yellow-500 text-yellow-500")} />
+                        {isFocusPoint ? "Remove focus" : "Set as focus"}
+                      </button>
+                    </div>
+                    <div className="py-1 px-1 border-t border-border">
                       <button
                         className="w-full px-2 py-1.5 text-sm text-left hover:bg-destructive/10 hover:text-destructive flex items-center gap-2 transition-colors rounded-sm"
                         onClick={(e) => { e.stopPropagation(); setConfirmOpen(true); closeDropdown(); }}

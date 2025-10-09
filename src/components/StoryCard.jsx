@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect, useCallback, memo } from 'react';
 import { Handle, Position, useReactFlow, useUpdateNodeInternals } from 'reactflow';
 import { motion } from 'framer-motion';
-import { GripVertical, Trash2, X, MoreVertical, Bot, Zap, RefreshCw, Check, Loader, Send, MessageSquare } from 'lucide-react';
+import { GripVertical, Trash2, X, MoreVertical, Bot, Zap, RefreshCw, Check, Loader, Send, MessageSquare, Star } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { AlertDialog, AlertDialogTrigger, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogAction, AlertDialogCancel } from '@/components/ui/alert-dialog';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
@@ -51,6 +51,7 @@ function StoryCard({ id, data, selected, onAddComment }) {
   // Check if card is read-only (from shared board with comment-only permission)
   const isReadOnly = data.isReadOnly || false;
   const onEditingChange = data.onEditingChange;
+  const isFocusPoint = data.isFocusPoint || false;
 
   useEffect(() => {
     setText(data.text || '');
@@ -259,6 +260,18 @@ function StoryCard({ id, data, selected, onAddComment }) {
     }));
   }, [id, setNodes, isReadOnly]);
 
+  const toggleFocusPoint = useCallback(() => {
+    if (isReadOnly) return;
+    setNodes((nds) =>
+      nds.map((node) =>
+        node.id === id ? { ...node, data: { ...node.data, isFocusPoint: !isFocusPoint } } : node
+      )
+    );
+    toast(isFocusPoint ? "Removed from focus" : "Set as focus point", {
+      icon: <Star className="w-4 h-4" />
+    });
+  }, [id, isFocusPoint, setNodes, isReadOnly]);
+
   const handleAiGenerate = useCallback(async (userComment = '') => {
     setAiLoading(true);
     setAiPanelOpen(true);
@@ -417,7 +430,8 @@ function StoryCard({ id, data, selected, onAddComment }) {
         className={cn(
           "bg-card border border-border rounded-lg w-80 h-auto node-card relative group",
           "transition-all duration-200",
-          selected && "border-primary/40"
+          selected && "border-primary/40",
+          isFocusPoint && "ring-4 ring-yellow-400/60 shadow-[0_0_30px_rgba(250,204,21,0.5)] border-yellow-400/50"
         )}
       >
       {/* Handle'lar - React Flow varsayılan konumlandırması */}
@@ -528,6 +542,22 @@ function StoryCard({ id, data, selected, onAddComment }) {
                     </div>
                   )}
                   
+                  {/* Focus point button */}
+                  {!isReadOnly && (
+                    <div className="py-1 px-1 border-t border-border">
+                      <button
+                        className="w-full px-2 py-1.5 text-sm text-left hover:bg-accent hover:text-accent-foreground flex items-center gap-2 transition-colors rounded-sm"
+                        onClick={() => {
+                          toggleFocusPoint();
+                          setIsDropdownOpen(false);
+                        }}
+                      >
+                        <Star className={cn("w-4 h-4", isFocusPoint && "fill-yellow-500 text-yellow-500")} />
+                        {isFocusPoint ? "Remove focus" : "Set as focus"}
+                      </button>
+                    </div>
+                  )}
+
                   {/* Add comment button - show for everyone if onAddComment exists */}
                   {onAddComment && (
                     <div className={cn("py-1 px-1", !isReadOnly && "border-t border-border")}>

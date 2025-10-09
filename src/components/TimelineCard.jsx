@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect, useCallback, memo } from 'react';
 import { Handle, Position, useReactFlow, useUpdateNodeInternals } from 'reactflow';
 import { motion } from 'framer-motion';
-import { Calendar as CalendarIcon, Check, X, Trash2, MoreVertical, GripVertical } from 'lucide-react';
+import { Calendar as CalendarIcon, Check, X, Trash2, MoreVertical, GripVertical, Star } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogAction, AlertDialogCancel } from '@/components/ui/alert-dialog';
 import { Calendar } from '@/components/ui/calendar';
@@ -30,53 +30,40 @@ function TimelineCard({ id, data, selected }) {
   const updateNodeInternals = useUpdateNodeInternals();
 
   const isReadOnly = data.isReadOnly || false;
+  const isFocusPoint = data.isFocusPoint || false;
 
   useEffect(() => { updateNodeInternals(id); }, [id, updateNodeInternals]);
 
-  // Popover açarken z-index'i ayarla
+  // Popover açma
   const openPopover = useCallback(() => {
     if (isReadOnly) return;
-    setNodes((nds) => nds.map((node) => 
-      node.id === id ? { ...node, zIndex: 1000 } : node
-    ));
     setIsPopoverOpen(true);
-  }, [id, setNodes, isReadOnly]);
+  }, [isReadOnly]);
 
-  // Popover kapatırken z-index'i sıfırla
+  // Popover kapatma
   const closePopover = useCallback(() => {
-    setNodes((nds) => nds.map((node) => 
-      node.id === id ? { ...node, zIndex: undefined } : node
-    ));
     setIsPopoverOpen(false);
-  }, [id, setNodes]);
+  }, []);
 
-  // Dropdown açarken z-index'i ayarla
+  // Dropdown toggle
   const toggleDropdown = useCallback(() => {
-    const willOpen = !isDropdownOpen;
-    setNodes((nds) => nds.map((node) => 
-      node.id === id ? { ...node, zIndex: willOpen ? 1000 : undefined } : node
-    ));
-    setIsDropdownOpen(willOpen);
-  }, [id, setNodes, isDropdownOpen]);
+    setIsDropdownOpen(!isDropdownOpen);
+  }, [isDropdownOpen]);
 
-  // Dropdown kapatırken z-index'i sıfırla
+  // Dropdown kapatma
   const closeDropdown = useCallback(() => {
-    setNodes((nds) => nds.map((node) => 
-      node.id === id ? { ...node, zIndex: undefined } : node
-    ));
     setIsDropdownOpen(false);
-  }, [id, setNodes]);
+  }, []);
 
   const handleDateSelect = useCallback((date) => {
     if (isReadOnly) return;
-    // Immediately save and close when date is selected
-    setNodes((nds) => nds.map((node) => node.id === id ? { ...node, data: { ...node.data, date: date ? date.toISOString() : '' }, zIndex: undefined } : node));
-    setIsPopoverOpen(false);
-    // Persist via planner callback
-    if (typeof (data && data.onNodeDataChange) === 'function') {
+
+    // Use callback pattern - no setNodes needed
+    if (typeof data?.onNodeDataChange === 'function') {
       data.onNodeDataChange(id, { date: date ? date.toISOString() : '' });
     }
-  }, [id, setNodes, isReadOnly]);
+    setIsPopoverOpen(false);
+  }, [id, isReadOnly, data]);
 
   useEffect(() => {
     function handleClickOutside(event) {
@@ -93,13 +80,12 @@ function TimelineCard({ id, data, selected }) {
   }, [isPopoverOpen, isDropdownOpen, closePopover, closeDropdown]);
 
   const handleDelete = useCallback(() => {
-    setNodes((nds) => nds.filter((node) => node.id !== id));
-    setEdges((eds) => eds.filter((edge) => edge.source !== id && edge.target !== id));
-    toast('Timeline card deleted.', { icon: <Trash2 className="w-4 h-4" /> });
-    if (typeof (data && data.onDeleteNode) === 'function') {
+    // Use callback pattern from ReactFlowPlanner
+    if (typeof data?.onDeleteNode === 'function') {
       data.onDeleteNode(id);
     }
-  }, [id, setNodes, setEdges]);
+    toast('Timeline card deleted.', { icon: <Trash2 className="w-4 h-4" /> });
+  }, [id, data]);
 
   const duplicateCard = useCallback(() => {
     try {
@@ -131,6 +117,16 @@ function TimelineCard({ id, data, selected }) {
     }
   }, [getNodes, id, setNodes, data.date, data.onNodeDataChange, data.onDeleteNode]);
 
+  const toggleFocusPoint = useCallback(() => {
+    if (isReadOnly) return;
+    if (typeof data?.onNodeDataChange === 'function') {
+      data.onNodeDataChange(id, { isFocusPoint: !isFocusPoint });
+    }
+    toast(isFocusPoint ? "Removed from focus" : "Set as focus point", {
+      icon: <Star className="w-4 h-4" />
+    });
+  }, [id, isFocusPoint, isReadOnly, data]);
+
   const currentDate = data.date ? new Date(data.date) : null;
   const display = currentDate ? currentDate.toLocaleDateString() : 'Pick a date';
 
@@ -141,7 +137,8 @@ function TimelineCard({ id, data, selected }) {
           "bg-gradient-to-r from-purple-200 to-purple-300 dark:from-purple-950/50 dark:to-purple-900/50 border-2 border-purple-400 dark:border-purple-800 rounded-lg w-72 h-12 node-card relative group",
           "transition-all duration-200",
           selected && "border-purple-400",
-          !isReadOnly && "cursor-pointer"
+          !isReadOnly && "cursor-pointer",
+          isFocusPoint && "ring-4 ring-yellow-400/60 shadow-[0_0_30px_rgba(250,204,21,0.5)] border-yellow-400/50"
         )}
         onClick={() => !isReadOnly && openPopover()}
       >
@@ -180,8 +177,17 @@ function TimelineCard({ id, data, selected }) {
               <MoreVertical className="w-3 h-3 text-purple-600 dark:text-white" />
             </button>
             {isDropdownOpen && (
-              <div className="absolute right-0 top-full mt-1 w-32 bg-popover border border-border rounded-md shadow-lg z-[9999] animate-in fade-in-0 zoom-in-95">
-                <div className="py-1 px-1 space-y-0.5">
+              <div className="absolute right-0 top-full mt-1 w-36 bg-popover border border-border rounded-md shadow-lg z-[9999] animate-in fade-in-0 zoom-in-95">
+                <div className="py-1 px-1">
+                  <button
+                    className="w-full px-2 py-1.5 text-xs text-left hover:bg-accent hover:text-accent-foreground flex items-center gap-2 transition-colors rounded-sm"
+                    onClick={(e) => { e.stopPropagation(); toggleFocusPoint(); closeDropdown(); }}
+                  >
+                    <Star className={cn("w-3 h-3", isFocusPoint && "fill-yellow-500 text-yellow-500")} />
+                    {isFocusPoint ? "Remove focus" : "Set as focus"}
+                  </button>
+                </div>
+                <div className="py-1 px-1 border-t border-border">
                   <button
                     className="w-full px-2 py-1.5 text-xs text-left hover:bg-destructive/10 hover:text-destructive flex items-center gap-2 transition-colors rounded-sm"
                     onClick={(e) => { e.stopPropagation(); setConfirmOpen(true); closeDropdown(); }}

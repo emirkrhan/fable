@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect, useCallback, memo } from 'react';
 import { Handle, Position, useReactFlow, useUpdateNodeInternals } from 'reactflow';
 import { motion } from 'framer-motion';
-import { GripVertical, Trash2, MoreVertical, ExternalLink, Link as LinkIcon, Edit3, Check, X } from 'lucide-react';
+import { GripVertical, Trash2, MoreVertical, ExternalLink, Link as LinkIcon, Edit3, Check, X, Star } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogAction, AlertDialogCancel } from '@/components/ui/alert-dialog';
 import { toast } from 'sonner';
@@ -34,6 +34,7 @@ function LinkCard({ id, data, selected }) {
   const updateNodeInternals = useUpdateNodeInternals();
 
   const isReadOnly = data.isReadOnly || false;
+  const isFocusPoint = data.isFocusPoint || false;
 
   // Sadece data değiştiğinde temp değerleri güncelle (external update için)
   useEffect(() => {
@@ -50,78 +51,38 @@ function LinkCard({ id, data, selected }) {
 
   const handleSave = useCallback(() => {
     if (isReadOnly) return;
-    setNodes((nds) =>
-      nds.map((node) =>
-        node.id === id
-          ? { ...node, data: { ...node.data, url: tempUrl, preview: tempPreview } }
-          : node
-      )
-    );
     setIsEditing(false);
     if (typeof data.onNodeDataChange === 'function') {
       data.onNodeDataChange(id, { url: tempUrl, preview: tempPreview });
     }
-  }, [id, tempUrl, tempPreview, setNodes, isReadOnly]);
+  }, [id, tempUrl, tempPreview, isReadOnly, data]);
 
-  // Popover açarken z-index'i ayarla
+  // Popover açarken
   const openPopover = useCallback(() => {
     if (isReadOnly) return;
-    setNodes((nds) => nds.map((node) => 
-      node.id === id ? { ...node, zIndex: 1000 } : node
-    ));
     setIsPopoverOpen(true);
     setIsEditing(true);
-  }, [id, setNodes, isReadOnly]);
+  }, [isReadOnly]);
 
-  // Popover kapatırken z-index'i sıfırla ve değişiklikleri kaydet
+  // Popover kapatırken değişiklikleri kaydet
   const closePopover = useCallback(() => {
-    if (isReadOnly) {
-      setIsPopoverOpen(false);
-      setIsEditing(false);
-      setNodes((nds) => nds.map((node) =>
-        node.id === id ? { ...node, zIndex: undefined } : node
-      ));
-      return;
-    }
-
-    // Önce popover state'lerini kapat
     setIsPopoverOpen(false);
     setIsEditing(false);
 
-    // Değişiklikleri kaydet - React batch update sonrası
-    setTimeout(() => {
-      setNodes((nds) => nds.map((node) => {
-        if (node.id !== id) return node;
+    if (!isReadOnly && typeof data?.onNodeDataChange === 'function') {
+      data.onNodeDataChange(id, { url: tempUrl, preview: tempPreview });
+    }
+  }, [id, isReadOnly, tempUrl, tempPreview, data]);
 
-        return {
-          ...node,
-          data: {
-            ...node.data,
-            url: tempUrl,
-            preview: tempPreview
-          },
-          zIndex: undefined
-        };
-      }));
-    }, 0);
-  }, [id, setNodes, isReadOnly, tempUrl, tempPreview]);
-
-  // Dropdown açarken z-index'i ayarla
+  // Dropdown toggle
   const toggleDropdown = useCallback(() => {
-    const willOpen = !isDropdownOpen;
-    setNodes((nds) => nds.map((node) => 
-      node.id === id ? { ...node, zIndex: willOpen ? 1000 : undefined } : node
-    ));
-    setIsDropdownOpen(willOpen);
-  }, [id, setNodes, isDropdownOpen]);
+    setIsDropdownOpen(!isDropdownOpen);
+  }, [isDropdownOpen]);
 
-  // Dropdown kapatırken z-index'i sıfırla
+  // Dropdown kapatma
   const closeDropdown = useCallback(() => {
-    setNodes((nds) => nds.map((node) => 
-      node.id === id ? { ...node, zIndex: undefined } : node
-    ));
     setIsDropdownOpen(false);
-  }, [id, setNodes]);
+  }, []);
 
   // Close popover and dropdown when clicking outside
   useEffect(() => {
@@ -145,13 +106,12 @@ function LinkCard({ id, data, selected }) {
 
 
   const handleDelete = useCallback(() => {
-    setNodes((nds) => nds.filter((node) => node.id !== id));
-    setEdges((eds) => eds.filter((edge) => edge.source !== id && edge.target !== id));
-    toast("Link card deleted.", { icon: <Trash2 className="w-4 h-4" /> });
-    if (typeof data.onDeleteNode === 'function') {
+    // Use callback pattern from ReactFlowPlanner
+    if (typeof data?.onDeleteNode === 'function') {
       data.onDeleteNode(id);
     }
-  }, [id, setNodes, setEdges]);
+    toast("Link card deleted.", { icon: <Trash2 className="w-4 h-4" /> });
+  }, [id, data]);
 
   const openLink = () => {
     if (data.url) {
@@ -166,6 +126,16 @@ function LinkCard({ id, data, selected }) {
     return data.url;
   };
 
+  const toggleFocusPoint = useCallback(() => {
+    if (isReadOnly) return;
+    if (typeof data?.onNodeDataChange === 'function') {
+      data.onNodeDataChange(id, { isFocusPoint: !isFocusPoint });
+    }
+    toast(isFocusPoint ? "Removed from focus" : "Set as focus point", {
+      icon: <Star className="w-4 h-4" />
+    });
+  }, [id, isFocusPoint, isReadOnly, data]);
+
   return (
     <div className="relative">
       <div
@@ -173,7 +143,8 @@ function LinkCard({ id, data, selected }) {
           "bg-gradient-to-r from-blue-200 to-blue-300 dark:from-blue-950/50 dark:to-blue-900/50 border-2 border-blue-400 dark:border-blue-800 rounded-lg w-72 h-12 node-card relative group",
           "transition-all duration-200",
           selected && "border-blue-400",
-          !isReadOnly && "cursor-pointer"
+          !isReadOnly && "cursor-pointer",
+          isFocusPoint && "ring-4 ring-yellow-400/60 shadow-[0_0_30px_rgba(250,204,21,0.5)] border-yellow-400/50"
         )}
         onClick={(e) => {
           if (!isReadOnly && !isPopoverOpen) {
@@ -245,8 +216,17 @@ function LinkCard({ id, data, selected }) {
               </button>
 
               {isDropdownOpen && (
-                <div className="absolute right-0 top-full mt-1 w-32 bg-popover border border-border rounded-md shadow-lg z-[9999] animate-in fade-in-0 zoom-in-95">
+                <div className="absolute right-0 top-full mt-1 w-36 bg-popover border border-border rounded-md shadow-lg z-[9999] animate-in fade-in-0 zoom-in-95">
                   <div className="py-1 px-1">
+                    <button
+                      className="w-full px-2 py-1.5 text-xs text-left hover:bg-accent hover:text-accent-foreground flex items-center gap-2 transition-colors rounded-sm"
+                      onClick={(e) => { e.stopPropagation(); toggleFocusPoint(); closeDropdown(); }}
+                    >
+                      <Star className={cn("w-3 h-3", isFocusPoint && "fill-yellow-500 text-yellow-500")} />
+                      {isFocusPoint ? "Remove focus" : "Set as focus"}
+                    </button>
+                  </div>
+                  <div className="py-1 px-1 border-t border-border">
                     <button
                       className="w-full px-2 py-1.5 text-xs text-left hover:bg-destructive/10 hover:text-destructive flex items-center gap-2 transition-colors rounded-sm"
                       onClick={(e) => {

@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect, useCallback, memo } from 'react';
 import { Handle, Position, useReactFlow, useUpdateNodeInternals } from 'reactflow';
 import { motion } from 'framer-motion';
-import { GripVertical, Trash2, MoreVertical, Plus, MessageSquare } from 'lucide-react';
+import { GripVertical, Trash2, MoreVertical, Plus, MessageSquare, Star } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogAction, AlertDialogCancel } from '@/components/ui/alert-dialog';
 import { toast } from 'sonner';
@@ -29,6 +29,7 @@ function ListCard({ id, data, selected, onAddComment }) {
   const updateNodeInternals = useUpdateNodeInternals();
 
   const isReadOnly = data.isReadOnly || false;
+  const isFocusPoint = data.isFocusPoint || false;
 
   useEffect(() => {
     setItems(data.items || []);
@@ -89,12 +90,22 @@ function ListCard({ id, data, selected, onAddComment }) {
   }, [id, items, isReadOnly, data]);
 
   const handleDelete = useCallback(() => {
-    if (typeof data.onDeleteNode === 'function') {
+    // Use callback pattern from ReactFlowPlanner
+    if (typeof data?.onDeleteNode === 'function') {
       data.onDeleteNode(id);
     }
-    setEdges((eds) => eds.filter((edge) => edge.source !== id && edge.target !== id));
     toast("List card deleted.", { icon: <Trash2 className="w-4 h-4" /> });
-  }, [id, setEdges, data]);
+  }, [id, data]);
+
+  const toggleFocusPoint = useCallback(() => {
+    if (isReadOnly) return;
+    if (typeof data?.onNodeDataChange === 'function') {
+      data.onNodeDataChange(id, { isFocusPoint: !isFocusPoint });
+    }
+    toast(isFocusPoint ? "Removed from focus" : "Set as focus point", {
+      icon: <Star className="w-4 h-4" />
+    });
+  }, [id, isFocusPoint, isReadOnly, data]);
 
   return (
     <div className="relative">
@@ -102,7 +113,8 @@ function ListCard({ id, data, selected, onAddComment }) {
         className={cn(
           "bg-card border border-border rounded-lg w-80 h-auto node-card relative group",
           "transition-all duration-200",
-          selected && "border-primary/40"
+          selected && "border-primary/40",
+          isFocusPoint && "ring-4 ring-yellow-400/60 shadow-[0_0_30px_rgba(250,204,21,0.5)] border-yellow-400/50"
         )}
       >
         {/* Handle'lar - React Flow varsayılan konumlandırması */}
@@ -159,9 +171,25 @@ function ListCard({ id, data, selected, onAddComment }) {
 
                 {isDropdownOpen && (
                   <div className="absolute right-0 top-full mt-1 w-40 bg-popover border border-border rounded-md shadow-lg z-50 animate-in fade-in-0 zoom-in-95 data-[side=bottom]:slide-in-from-top-2">
+                    {/* Focus point button */}
+                    {!isReadOnly && (
+                      <div className="py-1 px-1">
+                        <button
+                          className="w-full px-2 py-1.5 text-sm text-left hover:bg-accent hover:text-accent-foreground flex items-center gap-2 transition-colors rounded-sm"
+                          onClick={() => {
+                            toggleFocusPoint();
+                            setIsDropdownOpen(false);
+                          }}
+                        >
+                          <Star className={cn("w-4 h-4", isFocusPoint && "fill-yellow-500 text-yellow-500")} />
+                          {isFocusPoint ? "Remove focus" : "Set as focus"}
+                        </button>
+                      </div>
+                    )}
+
                     {/* Add comment button - show for everyone if onAddComment exists */}
                     {onAddComment && (
-                      <div className="py-1 px-1">
+                      <div className={cn("py-1 px-1", !isReadOnly && "border-t border-border")}>
                         <button
                           className="w-full px-2 py-1.5 text-sm text-left hover:bg-accent hover:text-accent-foreground flex items-center gap-2 transition-colors rounded-sm"
                           onClick={() => {
