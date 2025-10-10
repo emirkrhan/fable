@@ -5,7 +5,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { shareBoardWithUser, unshareBoard } from '@/lib/supabase-boards';
+import { api } from '@/lib/api';
 import { toast } from 'sonner';
 import { Check, Loader2, X, Users } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
@@ -14,6 +14,8 @@ export default function ShareBoardDialog({ open, onOpenChange, boardId, sharedWi
   const { user } = useAuth();
   const [email, setEmail] = useState('');
   const [sharing, setSharing] = useState(false);
+
+  const getToken = () => localStorage.getItem('auth_token');
 
   const handleShare = async () => {
     if (!email.trim()) {
@@ -29,21 +31,32 @@ export default function ShareBoardDialog({ open, onOpenChange, boardId, sharedWi
     }
 
     setSharing(true);
-    const result = await shareBoardWithUser(boardId, email.trim());
-    setSharing(false);
-
-    if (result.success) {
+    try {
+      const token = getToken();
+      if (!token) throw new Error("No auth token found");
+      await api(`/boards/${boardId}/share`, {
+        method: 'POST',
+        token,
+        body: { email: email.trim() }
+      });
       toast.success('Board shared successfully!', { icon: <Check className="w-4 h-4" /> });
       setEmail('');
       if (onUpdate) onUpdate();
-    } else {
-      toast.error(result.error || 'Failed to share board');
+    } catch (error) {
+      toast.error(error.message || 'Failed to share board');
+    } finally {
+      setSharing(false);
     }
   };
 
   const handleUnshare = async (userId) => {
     try {
-      await unshareBoard(boardId, userId);
+      const token = getToken();
+      if (!token) throw new Error("No auth token found");
+      await api(`/boards/${boardId}/share/${userId}`, {
+        method: 'DELETE',
+        token
+      });
       toast.success('User removed from board', { icon: <Check className="w-4 h-4" /> });
       if (onUpdate) onUpdate();
     } catch (error) {
@@ -99,7 +112,7 @@ export default function ShareBoardDialog({ open, onOpenChange, boardId, sharedWi
                   >
                     <div className="flex-1 min-w-0">
                       <div className="text-sm font-medium truncate">
-                        {share.user?.email || share.user?.display_name || 'Unknown User'}
+                        {share.user?.email || 'Unknown User'}
                       </div>
                       <Badge variant="outline" className="text-xs mt-1">
                         Comment only

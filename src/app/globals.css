@@ -160,6 +160,12 @@
   stroke: hsl(var(--primary));
 }
 
+/* Hide node border while dragging to avoid visible outlines, especially on gray cards */
+.react-flow__node.dragging .node-card {
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
 .react-flow__controls {
   background: hsl(var(--card));
   border: 1px solid hsl(var(--border));

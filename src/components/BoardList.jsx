@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTheme } from '@/contexts/ThemeContext';
-import { getUserBoards, createBoard, deleteBoard, updateBoardName } from '@/lib/supabase-boards';
+import { api } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
@@ -48,7 +48,7 @@ export default function BoardList() {
     if (authLoading) return;
 
     if (!user) {
-      router.push('/login');
+      setLoading(false);
       return;
     }
     console.log('User data:', { photoURL: user.photoURL, displayName: user.displayName, email: user.email });
@@ -99,16 +99,15 @@ export default function BoardList() {
     return () => document.removeEventListener('click', handleClickOutside);
   }, [isFilterOpen, isSortOpen]);
 
+  const getToken = () => localStorage.getItem('auth_token');
+
   const loadBoards = async () => {
     try {
       setLoading(true);
-      const { owned, shared } = await getUserBoards();
-      // Combine owned and shared boards with ownership flag
-      const allBoards = [
-        ...owned.map(b => ({ ...b, isOwner: true })),
-        ...shared.map(b => ({ ...b, isOwner: false }))
-      ];
-      setBoards(allBoards);
+      const token = getToken();
+      if (!token) throw new Error("No auth token found");
+      const allBoards = await api('/boards', { token });
+      setBoards(allBoards.map(b => ({ ...b, isOwner: b.owner_id === user.uid })));
     } catch (error) {
       console.error('Error loading boards:', error);
       toast.error('Failed to load boards');
@@ -125,11 +124,16 @@ export default function BoardList() {
 
     try {
       setCreating(true);
-      const newBoard = await createBoard(newBoardName);
+      const token = getToken();
+      if (!token) throw new Error("No auth token found");
+      const newBoard = await api('/boards', {
+        method: 'POST',
+        token,
+        body: { name: newBoardName }
+      });
       toast.success('Board created!', { icon: <Check className="w-4 h-4" /> });
       setCreateDialogOpen(false);
       setNewBoardName('');
-      await loadBoards();
       // Navigate to new board
       router.push(`/boards/${newBoard.id}`);
     } catch (error) {
@@ -144,7 +148,12 @@ export default function BoardList() {
     if (!boardToDelete) return;
 
     try {
-      await deleteBoard(boardToDelete.id);
+      const token = getToken();
+      if (!token) throw new Error("No auth token found");
+      await api(`/boards/${boardToDelete.id}`, {
+        method: 'DELETE',
+        token
+      });
       toast.success('Board deleted!', { icon: <Trash2 className="w-4 h-4" /> });
       setDeleteDialogOpen(false);
       setBoardToDelete(null);
@@ -162,7 +171,13 @@ export default function BoardList() {
     }
 
     try {
-      await updateBoardName(boardToEdit.id, editBoardName);
+      const token = getToken();
+      if (!token) throw new Error("No auth token found");
+      await api(`/boards/${boardToEdit.id}`, {
+        method: 'PATCH',
+        token,
+        body: { name: editBoardName }
+      });
       toast.success('Board name updated!', { icon: <Check className="w-4 h-4" /> });
       setEditDialogOpen(false);
       setBoardToEdit(null);
@@ -204,12 +219,12 @@ export default function BoardList() {
     } else if (sortBy === 'name-desc') {
       return b.name.localeCompare(a.name);
     } else if (sortBy === 'oldest') {
-      const dateA = a.createdAt?.toDate?.() || new Date(a.createdAt);
-      const dateB = b.createdAt?.toDate?.() || new Date(b.createdAt);
+      const dateA = new Date(a.created_at);
+      const dateB = new Date(b.created_at);
       return dateA - dateB;
     } else { // 'recent'
-      const dateA = a.createdAt?.toDate?.() || new Date(a.createdAt);
-      const dateB = b.createdAt?.toDate?.() || new Date(b.createdAt);
+      const dateA = new Date(a.created_at);
+      const dateB = new Date(b.created_at);
       return dateB - dateA;
     }
   });
@@ -243,7 +258,7 @@ export default function BoardList() {
               <div className="flex-1 min-w-0">
                 <h3 className="text-sm font-medium truncate leading-tight text-card-foreground">{board.name}</h3>
                 <p className="text-[11px] mt-0.5 text-muted-foreground">
-                  {formatDate(board.createdAt)}
+                  {formatDate(board.created_at)}
                 </p>
               </div>
             </div>
@@ -314,9 +329,9 @@ export default function BoardList() {
           )}
 
           {/* Owner info - For shared boards */}
-          {!board.isOwner && board.ownerInfo && (
+          {!board.isOwner && board.owner && (
             <div className="mt-2 text-[10px] text-muted-foreground">
-              Shared by {board.ownerInfo.displayName || board.ownerInfo.email}
+              Shared by {board.owner.displayName || board.owner.email}
             </div>
           )}
         </div>

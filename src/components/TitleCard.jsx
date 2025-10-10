@@ -64,6 +64,21 @@ function TitleCard({ id, data, selected }) {
     }
   }, [id, text, setNodes, isReadOnly]);
 
+  // Debounced change propagation while typing
+  const debounceRef = useRef(null);
+  useEffect(() => {
+    if (isReadOnly) return;
+    if (!isEditing) return;
+    if (typeof data?.onNodeDataChange !== 'function') return;
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      try { data.onNodeDataChange(id, { text }); } catch (_) {}
+    }, 300);
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, [text, isEditing, isReadOnly, data, id]);
+
   const handleKeyDown = (e) => {
     if (e.key === 'Enter') {
       e.preventDefault();

@@ -183,7 +183,7 @@ function CharacterCard({ id, data, selected }) {
     <div className="relative">
       <div
         className={cn(
-          "bg-card border border-border rounded-lg w-80 h-auto node-card relative group",
+          "bg-card border-transparent rounded-lg w-80 h-auto node-card relative group",
           "transition-colors duration-150",
           selected && "border-primary/40",
           !isReadOnly && "cursor-pointer",

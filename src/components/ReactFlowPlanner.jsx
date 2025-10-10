@@ -22,6 +22,7 @@ import ImageCard from './ImageCard';
 import LocationCard from './LocationCard';
 import NumberCard from './NumberCard';
 import ListCard from './ListCard';
+import CodeCard from './CodeCard';
 import LabeledEdge from './LabeledEdge';
 import { Plus, Check, Loader2, Upload, Loader } from 'lucide-react';
 import TopNav from './TopNav';
@@ -31,7 +32,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useAutoSaveOptimized } from '@/hooks/useAutoSaveOptimized';
 import { useChangeTracker } from '@/hooks/useChangeTracker';
-import { getBoard, saveBoardContent, saveBoardPatches, getBoardPermission, updateBoardName } from '@/lib/supabase-boards';
+import { api } from '@/lib/api';
 import { useRouter } from 'next/navigation';
 import ShareBoardDialog from './ShareBoardDialog';
 
@@ -47,6 +48,7 @@ const nodeTypes = {
   listCard: ListCard,
   locationCard: LocationCard,
   numberCard: NumberCard,
+  codeCard: CodeCard,
 };
 
 // Wrapper for LabeledEdge to pass permission
@@ -179,7 +181,7 @@ export default function ReactFlowPlanner({ boardId }) {
     // Check user inside effect to avoid unnecessary re-renders
     const currentUserId = user?.uid;
     if (!currentUserId) {
-      router.push('/boards');
+      router.push('/login');
       return;
     }
 
@@ -187,7 +189,9 @@ export default function ReactFlowPlanner({ boardId }) {
       setIsLoading(true);
       try {
         console.log('🚀 Loading board:', boardId, 'for user:', currentUserId);
-        const board = await getBoard(boardId);
+        const token = getToken();
+        if (!token) throw new Error("No auth token found");
+        const board = await api(`/boards/${boardId}`, { token });
 
         if (!board) {
           console.error('❌ Board not found');
@@ -198,7 +202,7 @@ export default function ReactFlowPlanner({ boardId }) {
 
         console.log('✅ Board loaded:', board);
 
-        const permission = getBoardPermission(board, currentUserId);
+        const permission = board.permission;
         console.log('🔐 User permission:', permission);
         
         if (!permission) {
@@ -267,16 +271,18 @@ export default function ReactFlowPlanner({ boardId }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [boardId, authLoading]);
 
+  const getToken = () => typeof window !== 'undefined' ? window.localStorage.getItem('auth_token') : null;
+
   // Collaboration disabled: no cursor tracking
 
   const onConnect = useCallback(
     (params) =>
       setEdges((eds) => {
-        if (!user?.uid) {
-          toast("Please sign in to connect cards.");
-          window.location.replace('/login');
-          return eds;
-        }
+    if (!user?.uid) {
+      toast("Please sign in to connect cards.");
+      router.push('/login');
+      return eds;
+    }
         return addEdge({
           ...params,
           type: 'labeled',
@@ -330,7 +336,7 @@ export default function ReactFlowPlanner({ boardId }) {
   const addNode = useCallback((cardTypeOrEvent, position) => {
     if (!user?.uid) {
       toast("Please sign in to add cards.");
-      window.location.replace('/login');
+      router.push('/login');
       return;
     }
 
@@ -426,6 +432,11 @@ export default function ReactFlowPlanner({ boardId }) {
           ]
         };
         break;
+      case 'codeCard':
+        nodeData = {
+          code: '// Write your JavaScript code here\nconsole.log("Hello, World!");'
+        };
+        break;
       case 'storyCard':
       default:
         nodeData = { text: 'New Story Element' };
@@ -447,11 +458,31 @@ export default function ReactFlowPlanner({ boardId }) {
       return newNodes;
     });
 
+    // Track add operation for incremental save (ensures first save includes addNode)
+    try {
+      trackChange('nodes', [{ type: 'add', item: newNode }]);
+    } catch (e) {
+      console.warn('Failed to track addNode change', e);
+    }
+
     // Increment ref for next node
     nodeIdRef.current += 1;
     setNodeId(nodeIdRef.current);
 
-    const cardTypeName = cardType === 'commentCard' ? 'Comment' : cardType === 'linkCard' ? 'Link card' : 'Card';
+    const cardTypeNames = {
+      titleCard: 'Title card',
+      storyCard: 'Story card',
+      linkCard: 'Link card',
+      characterCard: 'Character card',
+      timelineCard: 'Timeline card',
+      commentCard: 'Comment',
+      imageCard: 'Image card',
+      listCard: 'List card',
+      locationCard: 'Location card',
+      numberCard: 'Number card',
+      codeCard: 'Code card'
+    };
+    const cardTypeName = cardTypeNames[cardType] || 'Card';
     toast(`${cardTypeName} created.`, { icon: <Check className="w-4 h-4" /> });
   }, [setNodes, boardPermission, user]);
 
@@ -562,8 +593,14 @@ export default function ReactFlowPlanner({ boardId }) {
         });
 
       // Save to board with 10 second timeout
+      const token = getToken();
+      if (!token) throw new Error("No auth token found");
       const saved = await withTimeout(
-        saveBoardContent(boardId, cleanNodes, cleanEdges),
+        api(`/boards/${boardId}`, {
+          method: 'PATCH',
+          token,
+          body: { nodes: cleanNodes, edges: cleanEdges }
+        }),
         10000
       );
 
@@ -585,7 +622,7 @@ export default function ReactFlowPlanner({ boardId }) {
       }
       throw e; // Re-throw for auto-save error handling
     }
-  }, [boardId, nodes, edges]);
+  }, [boardId, nodes, edges, user]);
 
   const workspaceData = useMemo(() => {
     const cleanNodes = nodes.map((node) => {
@@ -624,8 +661,13 @@ export default function ReactFlowPlanner({ boardId }) {
       try {
         const patches = getMergedChanges();
         console.log(`🚀 Using incremental update (${patches.length} patches)`);
-
-        await saveBoardPatches(boardId, patches);
+        const token = getToken();
+        if (!token) throw new Error("No auth token found");
+        await api(`/boards/${boardId}`, {
+          method: 'PATCH',
+          token,
+          body: { patches }
+        });
 
         // Clear changes after successful save
         clearChanges();
@@ -643,18 +685,19 @@ export default function ReactFlowPlanner({ boardId }) {
     console.log('📦 Using full state save');
     await handleSave(true);
     clearChanges(); // Clear tracked changes after full save
-  }, [handleSave, getChangeCount, getMergedChanges, clearChanges, boardId]);
+  }, [handleSave, getChangeCount, getMergedChanges, clearChanges, boardId, user]);
 
   const {
     status: saveStatus,
     hasUnsavedChanges,
-    loadFromLocalStorage
+    loadFromLocalStorage,
+    triggerSave
   } = useAutoSaveOptimized(
     silentSave,
     workspaceData,
     {
       debounceMs: 2000, // Reduced from 3000ms for faster response
-      enabled: !!user?.uid && !isLoading && !!boardPermission,
+      enabled: !!user?.uid && !isLoading,
       storageKey: `board-draft-${boardId}`, // Unique key per board
     }
   );
@@ -690,7 +733,7 @@ export default function ReactFlowPlanner({ boardId }) {
   const handleImportWorkspace = useCallback(() => {
     if (!user?.uid) {
       toast("Please sign in to import workspace.");
-      window.location.replace('/login');
+      router.push('/login');
       return;
     }
     fileInputRef.current?.click();
@@ -773,30 +816,50 @@ export default function ReactFlowPlanner({ boardId }) {
   // Handle board name change
   const handleBoardNameChange = useCallback(async (newName) => {
     if (!boardId || boardPermission !== 'owner') return;
+    const current = (currentBoard?.name || '').trim();
+    const next = (newName || '').trim();
+    if (!next || next === current) return;
 
     try {
-      await updateBoardName(boardId, newName);
-      setCurrentBoard((prev) => prev ? { ...prev, name: newName } : null);
+      const token = getToken();
+      if (!token) throw new Error("No auth token found");
+      const updatedBoard = await api(`/boards/${boardId}`, {
+        method: 'PATCH',
+        token,
+        body: { name: newName }
+      });
+      
+      // Update current board with all fields including permission
+      if (updatedBoard) {
+        setCurrentBoard(updatedBoard);
+        // Also update permission if it changed
+        if (updatedBoard.permission) {
+          setBoardPermission(updatedBoard.permission);
+        }
+      }
+      
       toast.success('Board name updated!', { icon: <Check className="w-4 h-4" /> });
     } catch (error) {
       console.error('Error updating board name:', error);
       toast.error('Failed to update board name');
     }
-  }, [boardId, boardPermission]);
+  }, [boardId, boardPermission, user]);
 
   // Reload board data after share dialog changes
   const reloadBoardData = useCallback(async () => {
     if (!boardId) return;
 
     try {
-      const board = await getBoard(boardId);
+      const token = getToken();
+      if (!token) throw new Error("No auth token found");
+      const board = await api(`/boards/${boardId}`, { token });
       if (board) {
         setCurrentBoard(board);
       }
     } catch (error) {
       console.error('Error reloading board:', error);
     }
-  }, [boardId]);
+  }, [boardId, user]);
 
   const enhancedNodes = useMemo(() => {
     const isReadOnly = boardPermission === 'comment-only';

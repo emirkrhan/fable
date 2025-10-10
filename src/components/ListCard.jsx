@@ -111,7 +111,7 @@ function ListCard({ id, data, selected, onAddComment }) {
     <div className="relative">
       <div
         className={cn(
-          "bg-card border border-border rounded-lg w-80 h-auto node-card relative group",
+          "bg-card border-transparent rounded-lg w-80 h-auto node-card relative group",
           "transition-all duration-200",
           selected && "border-primary/40",
           isFocusPoint && "ring-4 ring-yellow-400/60 shadow-[0_0_30px_rgba(250,204,21,0.5)] border-yellow-400/50"

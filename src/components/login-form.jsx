@@ -19,13 +19,19 @@ import { Input } from "@/components/ui/input"
 import { useAuth } from "@/contexts/AuthContext"
 import { useState } from "react"
 import { Loader2 } from "lucide-react"
+import { api } from "@/lib/api"
+import { useRouter } from "next/navigation"
 
 export function LoginForm({
   className,
   ...props
 }) {
-  const { signInWithGoogle } = useAuth();
+  const { signInWithGoogle, login } = useAuth();
+  const router = useRouter();
   const [isLoading, setIsLoading] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
 
   const handleGoogleSignIn = async () => {
     try {
@@ -34,6 +40,25 @@ export function LoginForm({
     } catch (error) {
       console.error('Google sign in error:', error);
       setIsLoading(false);
+    }
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!email || !password) return;
+    try {
+      setIsSubmitting(true);
+      const { token, user } = await api('/auth/login', {
+        method: 'POST',
+        body: { email, password }
+      });
+      login(user, token);
+      router.push('/boards');
+    } catch (err) {
+      console.error('Login failed:', err);
+      alert('Login failed');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -47,11 +72,11 @@ export function LoginForm({
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <form>
+          <form onSubmit={handleSubmit}>
             <FieldGroup>
               <Field>
                 <FieldLabel htmlFor="email">Email</FieldLabel>
-                <Input id="email" type="email" placeholder="m@example.com" required />
+                <Input id="email" type="email" placeholder="m@example.com" required value={email} onChange={(e) => setEmail(e.target.value)} disabled={isSubmitting} />
               </Field>
               <Field>
                 <div className="flex items-center">
@@ -62,10 +87,19 @@ export function LoginForm({
                     Forgot your password?
                   </a>
                 </div>
-                <Input id="password" type="password" required />
+                <Input id="password" type="password" required value={password} onChange={(e) => setPassword(e.target.value)} disabled={isSubmitting} />
               </Field>
               <Field>
-                <Button type="submit">Login</Button>
+                <Button type="submit" disabled={isSubmitting}>
+                  {isSubmitting ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      Logging in...
+                    </>
+                  ) : (
+                    'Login'
+                  )}
+                </Button>
                 <Button
                   variant="outline"
                   type="button"

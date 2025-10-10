@@ -33,6 +33,18 @@ export function useAutoSaveOptimized(saveFunction, data, options = {}) {
   const pendingSaveRef = useRef(false);
   const lastSaveTimeRef = useRef(0);
 
+  // To prevent stale closures, we use a ref to hold the latest data.
+  const latestData = useRef(data);
+  useEffect(() => {
+    latestData.current = data;
+  }, [data]);
+
+  // To prevent stale closures on the save function itself
+  const latestSaveFunction = useRef(saveFunction);
+  useEffect(() => {
+    latestSaveFunction.current = saveFunction;
+  }, [saveFunction]);
+
   // Create a hash of data for comparison
   // Uses JSON.stringify for accurate change detection
   const createHash = useCallback((obj) => {
@@ -49,19 +61,18 @@ export function useAutoSaveOptimized(saveFunction, data, options = {}) {
   }, []);
 
   // Save to localStorage as backup
-  const saveToLocalStorage = useCallback((data) => {
-    if (!storageKey) return;
-
-    try {
-      localStorage.setItem(storageKey, JSON.stringify({
-        data,
-        timestamp: new Date().toISOString(),
-        version: '1.0'
-      }));
-    } catch (error) {
-      console.error('Failed to save to localStorage:', error);
-    }
-  }, [storageKey]);
+  const saveToLocalStorage = useCallback(
+    (dataToSave) => {
+      if (!storageKey) return;
+      try {
+        const serialized = JSON.stringify(dataToSave);
+        localStorage.setItem(storageKey, serialized);
+      } catch (error) {
+        console.error('Error saving to localStorage:', error);
+      }
+    },
+    [storageKey]
+  );
 
   // Load from localStorage (for recovery)
   const loadFromLocalStorage = useCallback(() => {
@@ -86,7 +97,7 @@ export function useAutoSaveOptimized(saveFunction, data, options = {}) {
     try {
       localStorage.removeItem(storageKey);
     } catch (error) {
-      console.error('Failed to clear localStorage:', error);
+      console.error('Error clearing localStorage:', error);
     }
   }, [storageKey]);
 
@@ -97,7 +108,8 @@ export function useAutoSaveOptimized(saveFunction, data, options = {}) {
       return;
     }
 
-    const currentHash = createHash(data);
+    const currentData = latestData.current;
+    const currentHash = createHash(currentData);
     const lastSavedHash = createHash(lastSavedDataRef.current);
 
     // Skip if no changes
@@ -111,7 +123,7 @@ export function useAutoSaveOptimized(saveFunction, data, options = {}) {
     setHasUnsavedChanges(true);
 
     // Save to localStorage first (backup)
-    saveToLocalStorage(data);
+    saveToLocalStorage(currentData);
 
     let retries = 0;
     const maxRetries = 2;
@@ -119,10 +131,10 @@ export function useAutoSaveOptimized(saveFunction, data, options = {}) {
     while (retries <= maxRetries) {
       try {
         console.log('💾 Auto-saving to server... (attempt', retries + 1, ')');
-        await saveFunction();
+        await latestSaveFunction.current();
 
         // Success!
-        lastSavedDataRef.current = data;
+        lastSavedDataRef.current = currentData;
         setStatus('saved');
         setLastSaved(new Date());
         setHasUnsavedChanges(false);
@@ -139,6 +151,7 @@ export function useAutoSaveOptimized(saveFunction, data, options = {}) {
         // Handle pending save
         if (pendingSaveRef.current) {
           pendingSaveRef.current = false;
+          // Use a timeout to allow the current save flow to complete
           setTimeout(() => performSave(), 100);
         }
 
@@ -164,9 +177,9 @@ export function useAutoSaveOptimized(saveFunction, data, options = {}) {
     }
 
     isSavingRef.current = false;
-  }, [saveFunction, data, createHash, saveToLocalStorage, clearLocalStorage, status]);
+  }, [createHash, saveToLocalStorage, clearLocalStorage]);
 
-  // Main auto-save effect
+  // Effect to trigger auto-save on data change
   useEffect(() => {
     if (!enabled) {
       return;

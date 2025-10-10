@@ -159,7 +159,7 @@ function ImageCard({ id, data, selected }) {
     <div className="relative">
       <div
         className={cn(
-          "bg-card border border-border rounded-lg w-64 h-64 node-card relative group",
+          "bg-card border-transparent rounded-lg w-64 h-64 node-card relative group",
           "transition-all duration-200",
           selected && "border-primary/40",
           !isReadOnly && "cursor-pointer",

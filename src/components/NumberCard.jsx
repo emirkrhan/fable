@@ -87,7 +87,7 @@ function NumberCard({ id, data, selected }) {
     <div className="relative">
       <div
         className={cn(
-          'bg-card border border-border rounded-sm w-24 h-24 node-card relative group',
+          'bg-card border-transparent rounded-sm w-24 h-24 node-card relative group',
           'transition-all duration-200',
           selected && 'border-primary/40',
           !isReadOnly && 'cursor-pointer',
